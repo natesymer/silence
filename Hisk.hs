@@ -1,15 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Hisk (hiskRepl, hiskEval) where
-
-data HiskObject = String | Integer | HiskCell
-type HiskCell = (HiskObject, Maybe HiskObject)
-
--- data HiskObject = String | Integer | HiskCell {
---    car :: HiskObject,
---    cdr :: HiskObject
--- }
   
+import Data.Maybe
+
+data HiskObject = String | Integer | Double | HiskCell
+type HiskCell = (Maybe HiskObject, Maybe HiskObject)
+
+-------------------------------------------------------------------------------
+-- | helpers
+
+-- from http://rosettacode.org/wiki/Determine_if_a_string_is_numeric#Haskell
+isInteger s = case reads s :: [(Integer, String)] of
+  [(_, "")] -> True
+  _         -> False
+ 
+isDouble s = case reads s :: [(Double, String)] of
+  [(_, "")] -> True
+  _         -> False
+ 
+isNumeric :: String -> Bool
+isNumeric s = isInteger s || isDouble s
+
 -------------------------------------------------------------------------------
 -- | Repl 
   
@@ -27,71 +39,41 @@ hiskRepl prompt = do
 hiskEval :: String -> String
 hiskEval input = show $ hiskRead input
 
--- hiskRead :: String -> HiskObject
--- hiskRead input = splitExpr $ readExpr input 1 -- (tail $ init input) would work for readExprToplevel
-
 hiskRead :: String -> HiskObject
 hiskRead input = hiskRead' input 1 -- (tail $ init input) would work for readExprToplevel
 
 hiskRead' :: String -> Integer -> HiskObject
-hiskRead' input level = (carExpr, hiskRead' remainder)
+hiskRead' input level = (carExpr, Just $ hiskRead' remainder)
   where
     expr = readExpr input level
     carExpr = readCar expr 0
     remainder = (drop (length carExpr) expr)
 
---
--- hiskRead' :: String -> Integer -> HiskObject
--- hiskRead' input level = (fst expr, hiskRead' $ snd expr)
---   where
---     let expr = splitExpr $ readExpr input level
-
 -------------------------------------------------------------------------------
--- | helper functions
+-- | parseValue - parse a Lisp value.
 
-parseExpr :: String -> HiskObject
-parseExpr expr = 0 :: HiskObject -- TODO: write this
-
+parseValue :: String -> Maybe HiskObject
+parseValue "()" = Nothing
+parseValue expr -- = (Just 0) :: HiskObject -- TODO: write this
+  | isDouble expr      = Just (read expr) :: Double
+  | isInteger expr     = Just (read expr) :: Integer
+  | (head expr) == "'" = Just (Just "quote", Just $ tail expr)
+  | otherwise          = Just expr
+  
 -------------------------------------------------------------------------------
--- | readCar - reads the cons part of a form expression
+-- | readCar - reads the car part of a form expression in string form
 
-readCar' :: String -> Integer -> String -> HiskCell
-readCar' "" _ accum = (accum, Nothing)
+readCar' :: String -> Integer -> String -> Maybe HiskCell
+readCar' "" _ accum = Just (parseValue accum, Nothing)
 readCar' (x:xs) 0 accum -- breakable
   | x == "("  = readCar' xs 1 accum
-  | x == ")"  = (accum, Just $ readCar' xs 0 "")
-  | x == " "  = (accum, Just $ readCar' xs 0 "")
+  | x == ")"  = Just (parseValue accum, readCar' xs 0 "")
+  | x == " "  = Just (parseValue accum, readCar' xs 0 "")
   | otherwise = readCar' xs 0 (accum ++ x)
 readCar (x:xs) depth accum -- non-breakable
   | x == "("  = readCar' xs (depth + 1)
   | x == ")"  = readCar' xs (depth - 1)
   | otherwise = readCar' xs depth (accum ++ x)
-
--- readCar :: String -> Integer -> String
--- readCar "" _ = ""
--- readCar (x:xs) 0 -- breakable
---   | x == "("  = readCar xs 1
---   | x == ")"  = ""
---   | x == " "  = ""
---   | otherwise = x:(readCar xs 0)
--- readCar (x:xs) depth -- non-breakable
---   | x == "("  = readCar xs (depth + 1)
---   | x == ")"  = readCar xs (depth - 1)
---   | otherwise = x:(readCar xs depth)
-
--------------------------------------------------------------------------------
--- | splitExpr - Splits a line of code into a series of cons cells
-
--- splitExpr :: String -> HiskCell
--- splitExpr str = splitExpr str ""
---
--- splitExpr :: String -> String -> HiskCell
--- splitExpr "" str = str
--- splitExpr (x:xs) accum
---   | x == " " = ("", splitExpr xs 1)
---   | otherwise = do
---       let split = (splitExpr xs)
---       (x:(fst split), snd split)
 
 -------------------------------------------------------------------------------
 -- | readExpr - Collects chars after depth open parens until a paren that closes
@@ -116,11 +98,11 @@ readExpr' (x:xs) targetDepth depth
 -------------------------------------------------------------------------------
 -- | Lisp primitive functions 
 
-cons :: HiskObject -> HiskObject -> HiskCell
-cons one two = (one, Just two) :: HiskCell
+cons :: Maybe HiskObject -> Maybe HiskObject -> HiskCell
+cons one two = (one, two) :: HiskCell
 
 car :: HiskCell -> Maybe HiskObject
 car cell = (fst cell)
 
-cdr :: HiskCell -> HiskObject
+cdr :: HiskCell -> Maybe HiskObject
 cdr cell = (snd cell)
