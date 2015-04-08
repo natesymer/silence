@@ -1,108 +1,137 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, DeriveGeneric #-}
 
-module Hisk (hiskRepl, hiskEval) where
+--module Hisk (Expression (),cons) where
   
-import Data.Maybe
+import           Control.Applicative
+import qualified Data.Text as T
+import           Data.Char
 
-data HiskObject = String | Integer | Double | HiskCell
-type HiskCell = (Maybe HiskObject, Maybe HiskObject)
+import System.IO.Unsafe
+
+data Expression = LispSymbol String
+                | LispString String
+                | LispInteger Integer
+                | LispReal Double
+                | LispNull
+                | LispCell Expression Expression deriving (Show)
+
+-- -- uncomment to have an AST be turned back into code
+-- instance Show Expression where
+--   show = lispShow
 
 -------------------------------------------------------------------------------
--- | helpers
+-- | Lisp AST
 
--- from http://rosettacode.org/wiki/Determine_if_a_string_is_numeric#Haskell
+isParen :: Char -> Bool
+isParen '(' = True
+isParen ')' = True
+isParen _   = False
+
+splitList :: (Eq a) => a -> [a] -> [[a]]
+splitList _ [] = []
+splitList sep lst
+  | (head lst) == sep = splitList sep $ tail lst
+  | otherwise = part:(splitList sep $ drop (1 + (length part)) lst)
+                  where
+                    part = (takeWhile ((/=) sep) lst)
+
+lispShow :: Expression -> String
+lispShow (LispSymbol x) = x
+lispShow (LispString x) = "\"" ++ x ++ "\""
+lispShow (LispInteger x) = show x
+lispShow (LispReal x) = show x
+lispShow LispNull = "'()"
+lispShow (LispCell a b) = "(" ++ (show a) ++ " " ++ (show b) ++ ")"
+
+trim :: String -> String
+trim s = reverse $ dropWhile (\c -> c == ' ') $ reverse s
+
+preproc :: String -> String
+preproc ('(':xs) = " ( " ++ (preproc xs)
+preproc (')':xs) = " ) " ++ (preproc xs)
+preproc (x:xs) = x:preproc xs
+preproc a = a
+
+tokenize :: String -> [String]
+tokenize str = splitList ' ' $ trim $ preproc str
+
+-- group :: [String] -> Expression
+-- group ("(":xs) = map (coerce . group) $ takeWhile (\t -> t /= ")") xs
+-- group ("(":"(":xs) = append (group (takeWhile (\t -> t /= ")" xs)) (group (dropWhile (\t -> t /= ")" xs))
+-- group (")":xs) = lispError "unexpected )"
+-- group (x:xs) = coerce x:group xs
+
+lispRead :: [String] -> Expression
+lispRead [] = lispError "No tokens to read"
+lispRead ("(":xs) = if null remaining then (toConsList coerced) else (toConsList (coerced ++ [lispRead remaining])) 
+                      where
+                        raw = takeWhile (\t -> t /= "(") xs
+                        coerced = map coerce raw
+                        remaining = init $ drop (length raw) raw --tail $ dropWhile (not . isParen) (init xs)     
+lispRead x = toConsList $ map coerce x
+
+coerce :: String -> Expression
+coerce "" = error "Cannot parse empty token."
+coerce "'()" = LispNull
+coerce s@(x:xs)
+  | (last s) == x && x == '"' = LispString $ tail $ init s
+  | x == '\'' = LispCell (LispSymbol "quote") (lispRead $ tokenize xs)
+  | isInteger s = LispInteger $ read s
+  | isDouble s = LispReal $ read s
+  | otherwise = LispSymbol s
+  
+isInteger :: String -> Bool
 isInteger s = case reads s :: [(Integer, String)] of
   [(_, "")] -> True
   _         -> False
  
+isDouble :: String -> Bool
 isDouble s = case reads s :: [(Double, String)] of
   [(_, "")] -> True
   _         -> False
- 
-isNumeric :: String -> Bool
-isNumeric s = isInteger s || isDouble s
 
 -------------------------------------------------------------------------------
--- | Repl 
-  
-hiskRepl :: String -> IO ()
-hiskRepl prompt = do
+-- | Lisp evaluator
+
+-------------------------------------------------------------------------------
+-- | Lisp primitive functions
+
+cons :: Expression -> Expression -> Expression
+cons a b = LispCell a b
+
+car :: Expression -> Expression
+car (LispCell x y) = x
+car x              = error $ "Cannot take the car of " ++ lispShow x
+
+cdr :: Expression -> Expression
+cdr (LispCell x y) = y
+cdr x              = error $ "Cannot take the cdr of " ++ lispShow x
+
+append :: Expression -> Expression -> Expression
+append _ LispNull = error "Cannot append null to list."
+append LispNull b = cons b LispNull
+append (LispCell x xs) b = cons x (append xs b)
+append a b = cons a (cons b LispNull)
+
+toConsList :: [Expression] -> Expression
+toConsList (x:xs) = foldl append (cons x LispNull) xs
+
+lispError :: [Char] -> t
+lispError a = error a
+
+main = do
+  let code = "(this is (that foo))"
+  putStrLn $ "Code: " ++ code
+  putStrLn $ "Eval'd: " ++ (show $ lispRead $ tokenize code)
+  --print $ lispRead "(this 1)"
+  --print $ lispRead "(this '(shits real))"
+
+-------------------------------------------------------------------------------
+-- | Repl
+
+repl :: String -> IO ()
+repl prompt = do
   putStrLn prompt
   input <- getLine
-  putStrLn $ hiskEval input
+  putStrLn input -- TODO: Evaluate
   hiskRepl prompt
-  
--------------------------------------------------------------------------------
--- | Core language functions
-
--- RETURNS: evaluated result
-hiskEval :: String -> String
-hiskEval input = show $ hiskRead input
-
-hiskRead :: String -> HiskObject
-hiskRead input = hiskRead' input 1 -- (tail $ init input) would work for readExprToplevel
-
-hiskRead' :: String -> Integer -> HiskObject
-hiskRead' input level = (carExpr, Just $ hiskRead' remainder)
-  where
-    expr = readExpr input level
-    carExpr = readCar expr 0
-    remainder = (drop (length carExpr) expr)
-
--------------------------------------------------------------------------------
--- | parseValue - parse a Lisp value.
-
-parseValue :: String -> Maybe HiskObject
-parseValue "()" = Nothing
-parseValue expr -- = (Just 0) :: HiskObject -- TODO: write this
-  | isDouble expr      = Just (read expr) :: Double
-  | isInteger expr     = Just (read expr) :: Integer
-  | (head expr) == "'" = Just (Just "quote", Just $ tail expr)
-  | otherwise          = Just expr
-  
--------------------------------------------------------------------------------
--- | readCar - reads the car part of a form expression in string form
-
-readCar' :: String -> Integer -> String -> Maybe HiskCell
-readCar' "" _ accum = Just (parseValue accum, Nothing)
-readCar' (x:xs) 0 accum -- breakable
-  | x == "("  = readCar' xs 1 accum
-  | x == ")"  = Just (parseValue accum, readCar' xs 0 "")
-  | x == " "  = Just (parseValue accum, readCar' xs 0 "")
-  | otherwise = readCar' xs 0 (accum ++ x)
-readCar (x:xs) depth accum -- non-breakable
-  | x == "("  = readCar' xs (depth + 1)
-  | x == ")"  = readCar' xs (depth - 1)
-  | otherwise = readCar' xs depth (accum ++ x)
-
--------------------------------------------------------------------------------
--- | readExpr - Collects chars after depth open parens until a paren that closes
--- |            the first paren or the end of the string is reached.
--- |            
--- |            Depth is numbered from 0 to infinity. A depth of 0 is the toplevel,
--- |            a depth of 1 in "(func arg)" is "func arg", level two
--- |            of (func (funcTwo arg)) is "funcTwo arg", etc
-
-readExpr :: String -> Integer -> String
-readExpr input depth = readExpr' input depth 0
-
-readExpr' :: String -> Integer -> Integer -> String
-readExpr' "" _ _ = "" -- heh. Empty strings are easy :P
-readExpr' (x:xs) targetDepth depth
-  | x == ")" && depth == targetDepth = ""                                    -- we stop before the ) at a depth targetDepth
-  | depth == targetDepth             = x:(readExpr' xs targetDepth depth)    -- accumulate characters
-  | x == ")"                         = readExpr' xs targetDepth (depth - 1)  -- not the last quote on this level
-  | x == "("                         = readExpr' xs targetDepth (depth + 1)  -- open a new level
-  | otherwise                        = readExpr' xs targetDepth depth        -- skip characters
-  
--------------------------------------------------------------------------------
--- | Lisp primitive functions 
-
-cons :: Maybe HiskObject -> Maybe HiskObject -> HiskCell
-cons one two = (one, two) :: HiskCell
-
-car :: HiskCell -> Maybe HiskObject
-car cell = (fst cell)
-
-cdr :: HiskCell -> Maybe HiskObject
-cdr cell = (snd cell)
