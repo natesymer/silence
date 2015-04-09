@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import Hisk
+import Felony
 
 main :: IO ()
-main = hiskRepl "]hisk[=> "
+main = Felony.repl "𝝺 "

@@ -1,0 +1,20 @@
+name:                felony
+version:             0.0.1
+synopsis:            A Lisp written in Haskell. Scheme is to Felony as a scheme is a felony.
+homepage:            https://github.com/fhsjaagshs/hisk
+license:             MIT
+author:              Nathaniel
+maintainer:          nate@symer.io
+category:            Languages 
+build-type:          Simple
+cabal-version:       >=1.8
+data-dir:            assets
+
+executable blog
+  main-is:           Felony.hs
+  hs-source-dirs:    src
+  ghc-options:       -threaded -Wall -fwarn-tabs -fno-warn-orphans -fno-warn-unused-do-bind -O
+  build-depends:     base,
+                     parsec
+
+  
