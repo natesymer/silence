@@ -2,9 +2,9 @@
 
 module Felony where
 import qualified Data.Map as M
-import           Control.Monad.IO.Class
-import qualified Control.Applicative as A
-import           Control.Concurrent
+-- import           Control.Monad.IO.Class
+-- import qualified Control.Applicative as A
+-- import           Control.Concurrent
 import           System.IO.Unsafe
 import           System.IO
 import           Text.ParserCombinators.Parsec as Parsec hiding (spaces)
@@ -44,7 +44,7 @@ zipEnvironment :: [String] -> [Expression] -> Environment
 zipEnvironment keys exprs = Environment (M.fromList $ zip keys exprs) Nothing
 
 extendEnvironment :: Environment -> Environment -> Environment
-extendEnvironment parent (Environment bindings Nothing) = Environment bindings $ Just parent
+extendEnvironment prnt (Environment bndngs Nothing) = Environment bndngs $ Just prnt
 extendEnvironment _ _ = error "Cannot extend environment with an environment that already has a parent."
 
 childEnvironment :: Environment -> [String] -> [Expression] -> Environment
@@ -71,11 +71,11 @@ parseString = do char '"'
 parseAtom :: Parser Expression
 parseAtom = do first <- letter <|> symbol
                rest <- many (letter <|> digit <|> symbol)
-               let atom = [first] ++ rest
-               return $ case atom of
+               -- return $ case [first] ++ rest of
+               return $ case first:rest of
                           "#t" -> Bool True
                           "#f" -> Bool False
-                          otherwise -> Atom atom
+                          atom -> Atom atom
                           
 parseInteger :: Parser Expression
 parseInteger = fmap (Integer . read) $ many1 digit
@@ -116,6 +116,9 @@ lispShow (Integer x) = show x
 lispShow (Real x) = show x
 lispShow Null = "'()"
 lispShow (Cell a b) = "(" ++ (lispShow a) ++ " " ++ (lispShow b) ++ ")"
+lispShow (Bool True) = "#t"
+lispShow (Bool False) = "#f"
+lispShow (Procedure _ _ _) = "procedure"
 
 -- reads lisp code into an AST
 lispRead :: String -> Expression
@@ -127,13 +130,6 @@ lispRead input = case parse parseExpr "lisp" input of
 lispEval :: Environment -> Expression -> (Expression, Environment)
 lispEval env expr = do
   case expr of
-    (Atom a) -> case getEnvironment a env of
-                    Just lkup -> (lkup, env)
-                    Nothing -> error $ "Variable not found: " ++ a
-    (Integer a) -> (expr, env)
-    (String a) -> (expr, env)
-    (Real a) -> (expr, env)
-    (Bool a) -> (expr, env)
     -- (Cell (Atom "+") e) -> (lispMath "+" env e, env)
     -- (Cell (Atom "-") e) -> (lispMath "-" env e, env)
     -- (Cell (Atom "*") e) -> (lispMath "*" env e, env)
@@ -141,14 +137,13 @@ lispEval env expr = do
     (Cell (Atom "quote") (Cell e Null)) -> (e, env)
     (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell iffalse _)))) -> lispEval env iffalse 
     (Cell (Atom "if") (Cell (Bool True) (Cell iftrue _))) -> lispEval env iftrue
-    (Cell (Atom "if") e) -> error "Invalid special form: if."
+    (Cell (Atom "if") _) -> error "Invalid special form: if."
     (Cell (Atom "cons") (Cell a (Cell b Null))) -> (Cell a b, env)
-    (Cell (Atom "cons") (Cell a (Cell b _))) -> error "cons: Too many arguments."
-    (Cell (Atom "cons") a) -> error "cons: Too few arguments."
+    (Cell (Atom "cons") _) -> error "cons: Incorrect number of arguments."
     (Cell (Atom "car") (Cell a _)) -> (a, env)
     (Cell (Atom "car") e) -> error $ "car: Cannot take the car of: " ++ (show e)
     (Cell (Atom "cdr") (Cell _ b)) -> (b, env)
-    (Cell (Atom "cdr") e) -> error $ "car: Cannot take the cdr of: " ++ (lispShow (Cell (Atom "display") (Cell (Atom "quote") e)))
+    (Cell (Atom "cdr") e) -> error $ "car: Cannot take the cdr of: " ++ (show e)
     (Cell (Atom "display") (Cell e Null)) -> seq (print e) $ seq (unsafePerformIO $ putStrLn $ show $ fst $ lispEval env e) (Null, env)
     (Cell (Atom "bind") (Cell e (Cell value _))) -> (Atom key, setEnvironment key env value) 
                                                       where 
@@ -156,12 +151,19 @@ lispEval env expr = do
     (Cell (Atom "begin") e) -> lispBegin env e
 --    (Cell (Atom "fork") e) -> seq (unsafePerformIO $ forkOS $ lispBegin env e) (Null, env)
     (Cell (Atom "lambda") (Cell argNamesList bodyList)) -> (Procedure env (map (\(Atom x) -> x) (fromConsList argNamesList)) (fromConsList bodyList), env)
-    (Cell (Atom "lambda") e) -> error $ "Invalid lambda: " ++ (lispShow e)
-    (Cell (Procedure procenv argNamesList bodies) e) -> lispBegin (childEnvironment env argNamesList (fromConsList e)) (toConsList bodies)
-    -- (Cell (Atom a) e) -> case getEnvironment a env of
-    --                       Just lkup -> lispEval env $ Cell lkup e
-    --                       Nothing -> error $ "Atom not found in environment: " ++ a
-    e -> error $ "Invalid form: " ++ show expr
+    (Cell (Atom "lambda") e) -> error $ "Invalid lambda: " ++ (show e)
+    (Cell (Atom a) e) -> case getEnvironment a env of
+                          Just lkup -> lispEval env $ Cell lkup e
+                          Nothing -> error $ "Atom not found in environment: " ++ a
+    (Cell (Procedure procenv argNamesList bodies) e) -> lispBegin (childEnvironment procenv argNamesList (fromConsList e)) (toConsList bodies)
+    (Atom a) -> case getEnvironment a env of
+                    Just lkup -> (lkup, env)
+                    Nothing -> error $ "Variable not found: " ++ a
+    (Integer _) -> (expr, env)
+    (String _) -> (expr, env)
+    (Real _) -> (expr, env)
+    (Bool _) -> (expr, env)
+    e -> error $ "Invalid form: " ++ (show e)
     
 repl :: String -> IO ()
 repl prompt = do
@@ -172,7 +174,7 @@ repl prompt = do
   repl prompt
   
 evalProgram :: String -> Expression
-evalProgram code = fst $ lispBegin emptyEnvironment $ lispRead code
+evalProgram code = fst $ lispEval emptyEnvironment $ lispRead code
   
 -------------------------------------------------------------------------------
 -- | Lisp primitive functions
@@ -190,17 +192,14 @@ toConsList [] = Null
 fromConsList :: Expression -> [Expression]
 fromConsList Null = []
 fromConsList (Cell a b) = a:fromConsList b
-
--- lispFoldl :: () -> Expression -> Expression -> Expression
--- lispFoldl f z Null = z
--- lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
+fromConsList e = error $ "Not a cons list: " ++ (show e)
 
 -- returns true if the expression is a cons list
 isConsList :: Expression -> Bool
 isConsList Null = True
-isConsList (Cell a Null) = True
+isConsList (Cell _ Null) = True
 isConsList (Cell _ b) = isConsList b
-isConsList a = False
+isConsList _ = False
 
 -- evals each expression in a Lisp list and returns the result of the last eval
 lispBegin :: Environment -> Expression -> (Expression, Environment)
@@ -211,6 +210,10 @@ lispBegin env a = lispEval env a
 -- (apply + 1 2 3 4 5)
 -- lispApply :: Expression -> Expression -> Expression -> Expression
 -- lispApply (Atom exprName)
+
+-- lispFoldl :: () -> Expression -> Expression -> Expression
+-- lispFoldl f z Null = z
+-- lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
 
 -- recursively applies mathmematical operations over a cons list of arguments
 -- lispMath :: String -> Environment -> Expression -> Expression
