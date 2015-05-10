@@ -1,0 +1,1 @@
+(bind 'begin (lambda (*) ((lambda () *)))) ;; begin function, implemented using a lambda

@@ -8,6 +8,7 @@ maintainer:          nate@symer.io
 category:            Languages 
 build-type:          Simple
 cabal-version:       >=1.8
+data-dir:            lib
 
 executable felony
   main-is:           Main.hs
@@ -16,6 +17,7 @@ executable felony
   build-depends:     base,
                      parsec,
                      containers,
-                     transformers
+                     transformers,
+                     mtl
 
   

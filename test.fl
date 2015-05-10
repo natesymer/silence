@@ -1,3 +1,3 @@
 (begin
-  (bind 'asdf 1)
-  (display asdf))
+  ;asdf
+  (display "shit"))
