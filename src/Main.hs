@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Felony
+import Felony.Repl
 import System.IO
 import System.Environment
 
@@ -11,7 +12,7 @@ evalProgram :: String -> IO Expression
 evalProgram = lispRun . lispRead
 
 procArgs :: [String] -> IO ()
-procArgs ["-r"] = Felony.repl "𝝺 "
+procArgs ["-r"] = Felony.Repl.terminalRepl "𝝺 "
 procArgs ["-ep", code] = evalProgram code >>= print
 procArgs ["-e", code] = seq (evalProgram code) return ()
 procArgs ["-f", fp] = readFile fp >>= \c -> procArgs ["-e", c]

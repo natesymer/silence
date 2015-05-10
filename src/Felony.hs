@@ -174,15 +174,6 @@ lispEvalM :: Expression -> Felony Expression
 lispEvalM expr = do
   env <- get
   case expr of
-    -- exprs that get translated into other exprs
-   -- (Cell (Atom "begin") e) -> lispEvalM (Cell (lispEval env (Cell (Atom "lambda") (Cell Null e))) Null)
-    (Cell (Atom "quote") (Cell e Null)) -> return e
-    
-    -- exprs that perform a primitive operation of a modified expr
-    -- (fork )
-  --  (Cell (Atom "fork") e)
-  --seq (unsafePerformIO $ forkOS $ seq (lispBegin env e) (return ())) Null
-    
     -- if
     (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell iffalse _)))) -> lispEvalM iffalse 
     (Cell (Atom "if") (Cell (Bool True) (Cell iftrue _))) -> lispEvalM iftrue
@@ -196,47 +187,63 @@ lispEvalM expr = do
     (Cell (Atom "cdr") (Cell _ b)) -> return b
     (Cell (Atom "cdr") e) -> error $ "car: Cannot take the cdr of: " ++ (show e)
       
+    -- exprs that get translated into other exprs
+    (Cell (Atom "begin") e) -> lispEvalM (Cell (Atom "lambda") (Cell Null e)) >>= lispEvalM -- just returns proc, need to evaluate it
+    (Cell (Atom "quote") (Cell e Null)) -> return e
+    
     -- lambda
     (Cell (Atom "lambda") (Cell argnames bodies)) -> return $ Procedure env (map getAtom $ fromConsList argnames) (fromConsList bodies)
     (Cell (Atom "lambda") e) -> error $ "Invalid lambda: " ++ (show e)
-      
-    -- misc
-    (Cell (Atom "display") (Cell e Null)) -> do
-      lispEvalM e >>= liftIO . print
-      return Null
+    
+    -- TODO: `apply` function
+    
+    -- threaded execution
+    (Cell (Atom "fork") e) -> do
+      liftIO $ void $ forkOS $ void $ lispEval e env
+      return Null 
 
     -- environment operations
-    (Cell (Atom "bind!") (Cell e (Cell value _))) -> do
+    (Cell (Atom "bind!") (Cell e (Cell value Null))) -> do
       case e of
         Atom key -> do
           put $ setEnvironment key env value
           return $ Atom key
-        proc@(Procedure penv pargs pbodies) -> do
-          evaled <- lispEvalM proc
-          case evaled of
-            Atom key -> do
-              put $ setEnvironment key env value
-              return $ Atom key
-            _ -> error $ "Invalid binding."
-            
-    -- Procedure evaluation
+        bindexpr -> lispEvalM bindexpr >>= \e -> case e of
+          Atom key -> do
+            put $ setEnvironment key env value
+            return $ Atom key
+          _ -> error $ "Invalid binding."
+    (Atom a) -> case getEnvironment a env of -- environment lookup
+                    Just lkup -> return lkup
+                    Nothing -> error $ "Variable not found: " ++ a
+                    
+    -- TODO: (func asdf (arg1 arg2) (display arg1) (display arg2))
+    
+    -- misc
+    (Cell (Atom "display") (Cell e Null)) -> do
+      lispEvalM e >>= liftIO . print
+      return Null
+    
+    -- TODO: Evaluate procedures properly
+    
+    -- evaluation
     (Cell (Procedure procenv argNames bodies) e) -> do
       liftIO $ last <$> mapM f bodies
         where
           args = fromConsList e
           newEnv = (childEnvironment procenv argNames args)
           f a = lispEval a newEnv
+    (Cell a e) -> lispEvalM a >>= \a' -> lispEvalM $ Cell a' e
     
-    -- 
-    (Atom a) -> case getEnvironment a env of
-                    Just lkup -> return lkup
-                    Nothing -> error $ "Variable not found: " ++ a
+    -- fall through for literals
     (Integer _) -> return expr
     (String _) -> return expr
     (Real _) -> return expr
     (Bool _) -> return expr
     (Procedure _ _ _) -> return expr
     Null -> return expr
+    
+    -- invalid form catchall
     e -> error $ "Invalid form: " ++ (show e)
     
 append :: Expression -> Expression -> Expression
@@ -253,13 +260,6 @@ fromConsList :: Expression -> [Expression]
 fromConsList Null = []
 fromConsList (Cell a b) = a:fromConsList b
 fromConsList e = error $ "Not a cons list: " ++ (show e)
-
-repl :: String -> IO ()
-repl prompt = do
-  putStr prompt
-  hFlush stdout
-  getLine >>= ((flip (>>=) $ print) . lispRun . lispRead)
-  repl prompt
 
 -- -------------------------------------------------------------------------------
 -- -- | Lisp primitive functions

@@ -1,1 +1,3 @@
-(bind 'begin (lambda (*) ((lambda () *)))) ;; begin function, implemented using a lambda
+(begin
+  (bind 'beginPure (lambda (*) ((lambda () *)))) ;; begin function, implemented using a lambda
+  )
