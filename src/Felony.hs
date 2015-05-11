@@ -19,12 +19,7 @@ data Expression = Atom String
                 | Null
                 | Cell Expression Expression deriving (Eq, Show)
 
--- instance Num Expression where
---   Integer v1 + Integer v2 = Integer (v1 + v2)
---   Real v1 + Integer v2 = Real (v1 + v2)
---   Integer v1 + Real v2 = Real (v1 + v2)
---   Real v1 + Real v2 = Real (v1 + v2)
---   (+) _ _ = error "Mathematical operations not allowed"
+-- TODO: Fix issue with parsing Reals vs Integers
 
 getAtom :: Expression -> String
 getAtom (Atom a) = a
@@ -188,6 +183,26 @@ lispEvalM expr = do
     (Cell (Atom "car") e) -> error $ "car: Cannot take the car of: " ++ (show e)
     (Cell (Atom "cdr") (Cell _ b)) -> return b
     (Cell (Atom "cdr") e) -> error $ "car: Cannot take the cdr of: " ++ (show e)
+    
+    -- type checking
+    (Cell (Atom "integer?") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
+      (Integer _) -> return $ Bool True
+      _           -> return $ Bool False
+    (Cell (Atom "real?") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
+      (Real _) -> return $ Bool True
+      _        -> return $ Bool False
+    (Cell (Atom "string?") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
+      (String _) -> return $ Bool True
+      _          -> return $ Bool False
+    (Cell (Atom "atom?") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
+      (Atom _) -> return $ Bool True
+      _        -> return $ Bool False
+    (Cell (Atom "null?") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
+      Null       -> return $ Bool True
+      _          -> return $ Bool False
+    (Cell (Atom "pair?") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
+      (Cell _ _) -> return $ Bool True
+      _          -> return $ Bool False
       
     -- exprs that get translated into other exprs
     --(Cell (Atom "begin") e) -> lispEvalM (Cell (Atom "lambda") (Cell Null e)) >>= lispEvalM -- just returns proc, need to evaluate it
@@ -199,11 +214,14 @@ lispEvalM expr = do
     
     -- TODO: `apply` function
     
-    -- TODO: Fix evaluation
-    (Cell (Atom "+") (Cell h t)) -> return $ lispFoldl (lispMath (+)) h t
-    (Cell (Atom "-") (Cell h t)) -> return $ lispFoldl (lispMath (-)) h t
-    (Cell (Atom "*") (Cell h t)) -> return $ lispFoldl (lispMath (*)) h t
-    (Cell (Atom "/") (Cell h t)) -> return $ lispFoldl (lispMath (/)) h t
+    -- math
+    (Cell (Atom "+") (Cell h t)) -> lispFoldl (lispMath (+)) <$> (lispEvalM h) <*> (toConsList <$> (mapM lispEvalM (fromConsList t)))
+    (Cell (Atom "-") (Cell h t)) -> lispFoldl (lispMath (-)) <$> (lispEvalM h) <*> (toConsList <$> (mapM lispEvalM (fromConsList t)))
+    (Cell (Atom "*") (Cell h t)) -> lispFoldl (lispMath (*)) <$> (lispEvalM h) <*> (toConsList <$> (mapM lispEvalM (fromConsList t)))
+    (Cell (Atom "/") (Cell h t)) -> lispFoldl (lispMath (/)) <$> (lispEvalM h) <*> (toConsList <$> (mapM lispEvalM (fromConsList t)))
+    
+    -- equality
+    (Cell (Atom "==") e) -> Bool <$> (infiniteBicompare (==) <$> (mapM lispEvalM (fromConsList e)))
     
     -- IO-related
     (Cell (Atom "fork") e) -> (liftIO $ void $ forkOS $ void $ lispEval e env) >> return Null
@@ -225,12 +243,7 @@ lispEvalM expr = do
                     Nothing -> error $ "Binding not found: " ++ a
     
     (Cell (Atom a) e) -> lispEvalM (Atom a) >>= \a' -> lispEvalM $ Cell a' e
-                    
-                    
-    
-    -- TODO: (func asdf (arg1 arg2) (display arg1) (display arg2))
-    
-    -- 
+
     (Cell (Procedure procenv argNames bodies) e) -> do
       liftIO $ last <$> mapM f bodies
         where
@@ -238,7 +251,7 @@ lispEvalM expr = do
           newEnv = (childEnvironment procenv argNames args)
           f a = lispEval a newEnv
           
-    -- 
+    -- general evaluation
     (Cell a e) -> lispEvalM a >>= \a' -> lispEvalM $ Cell a' e
 
     -- fall through for literals
@@ -253,7 +266,6 @@ lispEvalM expr = do
     e -> error $ "Invalid form: " ++ (show e)
     
 append :: Expression -> Expression -> Expression
-append _ Null = error "Cannot append null to list."
 append Null b = Cell b Null
 append (Cell x xs) b = Cell x (append xs b)
 append a b = Cell a (Cell b Null)
@@ -273,11 +285,27 @@ numerify (Real v) = v
 numerify expr = error $ "Invalid number: " ++ (show expr)
 
 -------------------------------------------------------------------------------
--- | Lisp primitive functions
+-- | higher order functions implemented using Expression
 
 lispFoldl :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
 lispFoldl f z Null = z
 lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
+
+infiniteBicompare :: (Eq a) => (a -> a -> Bool) -> [a] -> Bool
+infiniteBicompare _ [] = True
+infiniteBicompare _ [x] = True
+infiniteBicompare f (x:y:rest)
+ | f x y = infiniteBicompare f (y:rest)
+ | otherwise = False
+
+-- lispFoldr :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
+-- lispFoldr f z Null = z
+-- lispFoldr f z (Cell x xs) = f x (lispFoldr f z xs)
+--
+-- lispMap :: (Expression -> Expression) -> Expression -> Expression
+-- lispMap f Null = Null
+-- lispMap f (Cell a b)  = (Cell (f a) (lispMap f b))
+-- lispMap f e = error $ "Not a list: " ++ (show e)
 
 --
 -- -- (apply + 1 2 3 4 5)
@@ -285,15 +313,4 @@ lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
 -- lispApply (Procedure env argslist bodies) args = lispBegin (zipEnvironment argslist (fromConsList args)) (toConsList bodies)
 -- lispApply _ _ = error "Cannot evaluate non-procedure."
 --
--- lispMap :: (Expression -> Expression) -> Expression -> Expression
--- lispMap f Null = Null
--- lispMap f (Cell a b)  = (Cell (f a) (lispMap f b))
--- lispMap f _ = error "Cannot map a non-conslist."
---
--- lispFoldl :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
--- lispFoldl f z Null = z
--- lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
---
--- lispFoldr :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
--- lispFoldr f z Null = z
--- lispFoldr f z (Cell x xs) = f x (lispFoldr f z xs)
+
