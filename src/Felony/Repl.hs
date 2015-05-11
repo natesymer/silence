@@ -13,7 +13,7 @@ repl outp inp prompt = do
   hPutStr outp prompt
   hFlush outp
   (try $ hGetLine inp) >>= \i -> case i of
-    Left (IOError _ EOF _ _ _ _) -> return ()-- do nothing, exit
+    Left (IOError _ EOF _ _ _ _) -> return ()
     Left (IOError _ _ _ errormessage _ _) -> hPutStrLn outp $ "Error: " ++ errormessage
     Right str -> do
       ((flip (>>=) $ (hPrint outp)) . lispRun . lispRead) str -- TODO: catch language errors

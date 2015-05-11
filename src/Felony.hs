@@ -1,14 +1,14 @@
-{-# LANGUAGE OverloadedStrings, DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings, DeriveGeneric, NoMonomorphismRestriction #-}
 
 module Felony where
 import           Control.Monad
 import           Control.Monad.State.Strict
-import qualified Data.Map as M
--- import           Control.Monad.IO.Class
-import qualified Control.Applicative as A
 import           Control.Concurrent
+import qualified Data.Map as M
 import           System.IO
 import           Text.ParserCombinators.Parsec as Parsec hiding (spaces)
+
+type Felony a = StateT Environment IO a
 
 data Expression = Atom String
                 | String String
@@ -109,7 +109,7 @@ parseInteger = fmap (Integer . read) $ many1 digit
 
 -- TODO: invalid
 parseReal :: Parser Expression
-parseReal = fmap (Real . read) $ many1 (digit <|> char '.')
+parseReal = fmap (Real . read) $ many1 (digit <|> (char '.'))
 
 parseQuoted :: Parser Expression
 parseQuoted = do
@@ -133,7 +133,7 @@ parseDottedList = do
     return $ Cell (head h) t
 
 parseExpr :: Parser Expression
-parseExpr = (parseAtom <|> parseString <|> parseInteger <|> parseReal <|> parseQuoted <|> parseList <|> fail "invalid syntax.")
+parseExpr = (parseAtom <|> parseString <|> parseReal <|> parseInteger <|> parseQuoted <|> parseList <|> fail "invalid syntax.")
 
 -------------------------------------------------------------------------------
 -- | Lisp core
@@ -156,11 +156,6 @@ lispRead "" = Null
 lispRead input = case parse parseExpr "" input of
     Left err -> error $ "Invalid syntax " ++ show err
     Right val -> val
-    
-type Felony a = StateT Environment IO a
-
-felonyIO :: IO a -> Felony a
-felonyIO = liftIO
   
 -- Runs lisp code. For external use
 lispRun :: Expression -> IO Expression
@@ -169,6 +164,13 @@ lispRun expr = lispEval expr emptyEnvironment
 -- used internally
 lispEval :: Expression -> Environment -> IO Expression -- used to return Felony expression
 lispEval expr env = evalStateT (lispEvalM expr) env
+
+lispMath :: (Double -> Double -> Double) -> Expression -> Expression -> Expression
+lispMath f (Integer o) (Integer p) = Integer $ truncate (f (fromIntegral o) (fromIntegral p))
+lispMath f (Integer a) (Real b)    = Real (f (fromIntegral a) b)
+lispMath f (Real a)    (Integer b) = Real (f a (fromIntegral b))
+lispMath f (Real a)    (Real b)    = Real (f a b)
+lispMath _ _        _              = error "Cannot perform math with non-numeric expression."
 
 lispEvalM :: Expression -> Felony Expression
 lispEvalM expr = do
@@ -188,7 +190,7 @@ lispEvalM expr = do
     (Cell (Atom "cdr") e) -> error $ "car: Cannot take the cdr of: " ++ (show e)
       
     -- exprs that get translated into other exprs
-    (Cell (Atom "begin") e) -> lispEvalM (Cell (Atom "lambda") (Cell Null e)) >>= lispEvalM -- just returns proc, need to evaluate it
+    --(Cell (Atom "begin") e) -> lispEvalM (Cell (Atom "lambda") (Cell Null e)) >>= lispEvalM -- just returns proc, need to evaluate it
     (Cell (Atom "quote") (Cell e Null)) -> return e
     
     -- lambda
@@ -197,10 +199,15 @@ lispEvalM expr = do
     
     -- TODO: `apply` function
     
-    -- threaded execution
-    (Cell (Atom "fork") e) -> do
-      liftIO $ void $ forkOS $ void $ lispEval e env
-      return Null 
+    -- TODO: Fix evaluation
+    (Cell (Atom "+") (Cell h t)) -> return $ lispFoldl (lispMath (+)) h t
+    (Cell (Atom "-") (Cell h t)) -> return $ lispFoldl (lispMath (-)) h t
+    (Cell (Atom "*") (Cell h t)) -> return $ lispFoldl (lispMath (*)) h t
+    (Cell (Atom "/") (Cell h t)) -> return $ lispFoldl (lispMath (/)) h t
+    
+    -- IO-related
+    --(Cell (Atom "fork") e) -> (liftIO $ void $ forkOS $ void $ lispEval e env) >> return Null
+    (Cell (Atom "display") (Cell e Null)) -> (lispEvalM e >>= liftIO . print) >> return Null
 
     -- environment operations
     (Cell (Atom "bind!") (Cell e (Cell value Null))) -> do
@@ -215,26 +222,25 @@ lispEvalM expr = do
           _ -> error $ "Invalid binding."
     (Atom a) -> case getEnvironment a env of -- environment lookup
                     Just lkup -> return lkup
-                    Nothing -> error $ "Variable not found: " ++ a
+                    Nothing -> error $ "Binding not found: " ++ a
+    
+    (Cell (Atom a) e) -> lispEvalM (Atom a) >>= \a' -> lispEvalM $ Cell a' e
                     
+                    
+    
     -- TODO: (func asdf (arg1 arg2) (display arg1) (display arg2))
     
-    -- misc
-    (Cell (Atom "display") (Cell e Null)) -> do
-      lispEvalM e >>= liftIO . print
-      return Null
-    
-    -- TODO: Evaluate procedures properly
-    
-    -- evaluation
+    -- 
     (Cell (Procedure procenv argNames bodies) e) -> do
       liftIO $ last <$> mapM f bodies
         where
           args = fromConsList e
           newEnv = (childEnvironment procenv argNames args)
           f a = lispEval a newEnv
+          
+    -- 
     (Cell a e) -> lispEvalM a >>= \a' -> lispEvalM $ Cell a' e
-    
+
     -- fall through for literals
     (Integer _) -> return expr
     (String _) -> return expr
@@ -261,24 +267,18 @@ fromConsList Null = []
 fromConsList (Cell a b) = a:fromConsList b
 fromConsList e = error $ "Not a cons list: " ++ (show e)
 
--- -------------------------------------------------------------------------------
--- -- | Lisp primitive functions
---
---
--- lispFork :: Environment -> Expression -> Expression
--- lispFork env e = seq (unsafePerformIO $ forkOS $ seq (lispBegin env e) (return ())) Null
---
--- -- evals each expression in a Lisp list and returns the result of the last eval
--- -- This function is a giant fucking ugly hack
--- -- Haskell doesn't compute things it doesn't need. When evaling a non-last expression
--- -- in a lambda or begin, the first half of the tuple would not be calculated (it was
--- -- not referenced), so the unsafe side effects would not happen.
--- lispBegin :: Environment -> Expression -> Expression
--- lispBegin env (Cell a Null) = fst $ lispEval env a
--- lispBegin env (Cell a b) = seq (fst e) lispBegin (snd e) b
---                             where
---                               e = lispEval env a
--- lispBegin env a = fst $ lispEval env a
+numerify :: Expression -> Double
+numerify (Integer v) = fromIntegral v
+numerify (Real v) = v
+numerify expr = error $ "Invalid number: " ++ (show expr)
+
+-------------------------------------------------------------------------------
+-- | Lisp primitive functions
+
+lispFoldl :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
+lispFoldl f z Null = z
+lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
+
 --
 -- -- (apply + 1 2 3 4 5)
 -- lispApply :: Expression -> Expression -> Expression
@@ -297,12 +297,3 @@ fromConsList e = error $ "Not a cons list: " ++ (show e)
 -- lispFoldr :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
 -- lispFoldr f z Null = z
 -- lispFoldr f z (Cell x xs) = f x (lispFoldr f z xs)
-
--- recursively applies mathmematical operations over a cons list of arguments
--- lispMath :: String -> Environment -> Expression -> Expression
--- lispMath _      env (Cell a Null)          = (fst $ lispEval env a)
--- lispMath op@"+" env (Cell a (Cell b rest)) = lispMath op env $ Cell ((+) A.<$> (fst $ lispEval env a) A.<*> (fst $ lispEval env b)) rest
--- lispMath op@"-" env (Cell a (Cell b rest)) = lispMath op env $ Cell ((-) A.<$> (fst $ lispEval env a) A.<*> (fst $ lispEval env b)) rest
--- lispMath op@"*" env (Cell a (Cell b rest)) = lispMath op env $ Cell ((*) A.<$> (fst $ lispEval env a) A.<*> (fst $ lispEval env b)) rest
--- lispMath op@"/" env (Cell a (Cell b rest)) = lispMath op env $ Cell ((/) A.<$> (fst $ lispEval env a) A.<*> (fst $ lispEval env b)) rest
--- lispMath _      _   expr                   = error $ "Invalid expression: " ++ (lispShow expr)
