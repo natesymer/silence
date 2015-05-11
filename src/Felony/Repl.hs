@@ -8,6 +8,9 @@ import           Control.Exception.Base
 import           System.IO.Error
 import           GHC.IO.Exception
 
+catcher :: String -> IO Expression
+catcher errmsg = putStrLn errmsg >> return Null
+
 repl :: Handle -> Handle -> String -> IO ()
 repl outp inp prompt = do
   hPutStr outp prompt
@@ -16,7 +19,9 @@ repl outp inp prompt = do
     Left (IOError _ EOF _ _ _ _) -> return ()
     Left (IOError _ _ _ errormessage _ _) -> hPutStrLn outp $ "Error: " ++ errormessage
     Right str -> do
-      ((flip (>>=) $ (hPrint outp)) . lispRun . lispRead) str -- TODO: catch language errors
+      (catch (lispRun $ lispRead str)
+             (\e -> lispRun $ Cell (Atom "display") (Cell (String (show (e :: ErrorCall))) Null)))
+             >>= (hPrint outp)
       repl outp inp prompt
       
 terminalRepl :: String -> IO ()

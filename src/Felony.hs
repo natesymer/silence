@@ -214,6 +214,8 @@ lispEvalM expr = do
     
     -- TODO: `apply` function
     
+    (Cell (Atom "apply") (Cell a (Cell e@(Cell _ _) Null))) -> lispEvalM e >>= \args -> lispEvalM (Cell a args)
+    
     -- math
     (Cell (Atom "+") (Cell h t)) -> lispFoldl (lispMath (+)) <$> (lispEvalM h) <*> (toConsList <$> (mapM lispEvalM (fromConsList t)))
     (Cell (Atom "-") (Cell h t)) -> lispFoldl (lispMath (-)) <$> (lispEvalM h) <*> (toConsList <$> (mapM lispEvalM (fromConsList t)))
@@ -302,10 +304,10 @@ infiniteBicompare f (x:y:rest)
 -- lispFoldr f z Null = z
 -- lispFoldr f z (Cell x xs) = f x (lispFoldr f z xs)
 --
--- lispMap :: (Expression -> Expression) -> Expression -> Expression
--- lispMap f Null = Null
--- lispMap f (Cell a b)  = (Cell (f a) (lispMap f b))
--- lispMap f e = error $ "Not a list: " ++ (show e)
+lispMap :: (Expression -> Expression) -> Expression -> Expression
+lispMap f Null = Null
+lispMap f (Cell a b)  = (Cell (f a) (lispMap f b))
+lispMap f e = error $ "Not a list: " ++ (show e)
 
 --
 -- -- (apply + 1 2 3 4 5)
