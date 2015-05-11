@@ -206,7 +206,7 @@ lispEvalM expr = do
     (Cell (Atom "/") (Cell h t)) -> return $ lispFoldl (lispMath (/)) h t
     
     -- IO-related
-    --(Cell (Atom "fork") e) -> (liftIO $ void $ forkOS $ void $ lispEval e env) >> return Null
+    (Cell (Atom "fork") e) -> (liftIO $ void $ forkOS $ void $ lispEval e env) >> return Null
     (Cell (Atom "display") (Cell e Null)) -> (lispEvalM e >>= liftIO . print) >> return Null
 
     -- environment operations
