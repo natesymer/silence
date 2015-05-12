@@ -9,7 +9,7 @@ main :: IO ()
 main = getArgs >>= procArgs
 
 evalProgram :: String -> IO Expression
-evalProgram = lispRun . lispRead
+evalProgram = lispEvalToplevel . lispRead
 
 procArgs :: [String] -> IO ()
 procArgs ["-r"] = Felony.Repl.terminalRepl "𝝺 "

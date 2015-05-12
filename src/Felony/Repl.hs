@@ -19,8 +19,8 @@ repl outp inp prompt = do
     Left (IOError _ EOF _ _ _ _) -> return ()
     Left (IOError _ _ _ errormessage _ _) -> hPutStrLn outp $ "Error: " ++ errormessage
     Right str -> do
-      (catch (lispRun $ lispRead str)
-             (\e -> lispRun $ Cell (Atom "display") (Cell (String (show (e :: ErrorCall))) Null)))
+      (catch (lispEvalToplevel $ lispRead str)
+             (\e -> lispEvalToplevel $ Cell (Atom "display") (Cell (String (show (e :: ErrorCall))) Null)))
              >>= (hPrint outp)
       repl outp inp prompt
       

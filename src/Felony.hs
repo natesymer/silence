@@ -19,10 +19,6 @@ data Expression = Atom String
                 | Null
                 | Cell Expression Expression deriving (Eq)
 
-getAtom :: Expression -> String
-getAtom (Atom a) = a
-getAtom e = error $ "Not an atom: " ++ (show e)
-
 data Environment = Environment {
   bindings :: M.Map String Expression,
   parent :: Maybe Environment
@@ -43,6 +39,14 @@ infiniteBicompare f (x:y:rest)
 
 setEnvironment :: String -> Environment -> Expression -> Environment
 setEnvironment key (Environment bindings_ parent_) expr = Environment (M.insert key expr bindings_) parent_
+
+setParentEnvironment :: String -> Environment -> Expression -> Environment
+setParentEnvironment key (Environment b (Just (Environment pb pp))) expr = Environment b (Just $ Environment (M.insert key expr pb) pp)
+setParentEnvironment key env _ = env
+
+-- unsetEnvironment :: [String] -> Environment -> Environment
+-- unsetEnvironment [] env = env
+-- unsetEnvironment (key:ks) (Environment bindings_ parent_) = unsetEnvironment ks $ Environment (M.delete key bindings_) parent_
 
 getEnvironment :: String -> Environment -> Maybe Expression
 getEnvironment key (Environment bindings_ parent_) = case M.lookup key bindings_ of
@@ -138,7 +142,7 @@ parseExpr :: Parser Expression
 parseExpr = (parseAtom <|> parseString <|> parseNumber <|> parseQuoted <|> parseList <|> fail "invalid syntax.")
 
 -------------------------------------------------------------------------------
--- | Lisp core
+-- | Display
 
 instance Show Expression where
   show (Atom x) = x
@@ -146,49 +150,50 @@ instance Show Expression where
   show (Integer x) = show x
   show (Real x) = show x
   show Null = "'()"
-  show c@(Cell a b) = showCell c--"(" ++ (show a) ++ " " ++ (show b) ++ ")"
+  show c@(Cell a b) = showCell True c
   show (Bool True) = "#t"
   show (Bool False) = "#f"
   show (Procedure _ argsnames expressions) = show (Cell (Atom "procedure") (Cell (toConsList (map Atom argsnames)) (toConsList expressions)))
-  
-showCell :: Expression -> String
-showCell = (showCell' True)
-  
+
 -- Bool is hasLeadingParen
-showCell' :: Bool -> Expression  -> String
-showCell' True  (Cell a Null)         = "(" ++ (show a) ++ ")"
-showCell' False (Cell a Null)         = (show a) ++ ")"
-showCell' True  (Cell a b@(Cell _ _)) = "(" ++ (show a) ++ " " ++ (showCell' False b)
-showCell' False (Cell a b@(Cell _ _)) = (show a) ++ " " ++ (showCell' False b)
-showCell' _     (Cell a b)            = "(" ++ (show a) ++ " . " ++ (show b) ++ ")"
-showCell' _     _                     = error "Invalid cons cell."
+showCell :: Bool -> Expression  -> String
+showCell True  (Cell a Null)         = "(" ++ (show a) ++ ")"
+showCell False (Cell a Null)         = (show a) ++ ")"
+showCell True  (Cell a b@(Cell _ _)) = "(" ++ (show a) ++ " " ++ (showCell False b)
+showCell False (Cell a b@(Cell _ _)) = (show a) ++ " " ++ (showCell False b)
+showCell _     (Cell a b)            = "(" ++ (show a) ++ " . " ++ (show b) ++ ")"
+showCell _     _                     = error "Invalid cons cell."
+
+-------------------------------------------------------------------------------
+-- | Felony core
 
 -- reads lisp code into an AST
 lispRead :: String -> Expression
 lispRead "" = Null
 lispRead input = case parse parseExpr "" input of
-    Left err -> error $ "Invalid syntax " ++ show err
-    Right val -> val
-  
--- Runs lisp code. For external use
-lispRun :: Expression -> IO Expression
-lispRun expr = lispEval expr emptyEnvironment
-  
--- used internally
-lispEval :: Expression -> Environment -> IO Expression -- used to return Felony expression
+  Left err -> error $ "Invalid syntax " ++ show err
+  Right val -> val
+
+lispEvalToplevel :: Expression -> IO Expression
+lispEvalToplevel expr = lispEval (Cell (Atom "begin") (Cell expr Null)) emptyEnvironment
+
+lispEval :: Expression -> Environment -> IO Expression
 lispEval expr env = evalStateT (lispEvalM expr) env
 
-lispMath :: (Double -> Double -> Double) -> Expression -> Expression -> Expression
-lispMath f (Integer o) (Integer p) = Integer $ truncate (f (fromIntegral o) (fromIntegral p))
-lispMath f (Integer a) (Real b)    = Real (f (fromIntegral a) b)
-lispMath f (Real a)    (Integer b) = Real (f a (fromIntegral b))
-lispMath f (Real a)    (Real b)    = Real (f a b)
-lispMath _ _        _              = error "Cannot perform math with non-numeric expression."
+lispEvalEnvironment :: Expression -> Environment -> IO (Expression, Environment)
+lispEvalEnvironment expr env = runStateT (lispEvalM expr) env
 
 lispEvalM :: Expression -> Felony Expression
 lispEvalM expr = do
   env <- get
   case expr of
+    -- import
+    (Cell (Atom "import") e) -> do
+      codes <- (liftIO $ mapM readFile (map lispStringValue (fromConsList e)))
+      let exprs = map lispRead codes
+      mapM_ lispEvalM exprs
+      return Null
+    
     -- if
     (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell iffalse _)))) -> lispEvalM iffalse 
     (Cell (Atom "if") (Cell (Bool True) (Cell iftrue _))) -> lispEvalM iftrue
@@ -219,15 +224,24 @@ lispEvalM expr = do
       Null       -> return $ Bool True
       _          -> return $ Bool False
     (Cell (Atom "pair?") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
-      (Cell _ _) -> return $ Bool True
-      _          -> return $ Bool False
+      (Cell _ (Cell _ _)) -> return $ Bool False
+      (Cell _ _)          -> return $ Bool True
+      _                   -> return $ Bool False
+    (Cell (Atom "list?") (Cell lst Null)) -> Bool <$> (lispEvalM lst >>= return . isConsList)
+    
+    -- atom to string
+    -- TODO: evaluate!!!
+    --(Cell (Atom "a2s") (Cell (Atom "quote") (Cell (Atom s) _))) -> return $ String s
+    (Cell (Atom "a2s") (Cell (Cell (Atom "quote") (Cell (Atom a) Null)) Null)) -> return $ String a -- ((quote asdf))
+    (Cell (Atom "s2a") (Cell (String s) _)) -> return $ Atom s
       
     -- exprs that get translated into other exprs    (lambda (() . ))
-    (Cell (Atom "begin") e) -> lispEvalM (Cell (Atom "lambda") (Cell Null e)) -- just returns proc, need to evaluate it
+    (Cell (Atom "begin") e) -> lispEvalM (Cell (Cell (Atom "lambda") (Cell Null e)) Null) -- just returns proc, need to evaluate it
+    (Cell (Atom "list") e) -> return e
     (Cell (Atom "quote") (Cell e Null)) -> return e
     
     -- lambda
-    (Cell (Atom "lambda") (Cell argnames bodies)) -> return $ Procedure env (map getAtom $ fromConsList argnames) (fromConsList bodies)
+    (Cell (Atom "lambda") (Cell argnames bodies)) -> return $ Procedure env (map lispAtomValue $ fromConsList argnames) (fromConsList bodies)
     (Cell (Atom "lambda") e) -> error $ "Invalid lambda: " ++ (show e)
     
     -- apply
@@ -251,25 +265,46 @@ lispEvalM expr = do
     (Cell (Atom "bind!") (Cell e (Cell value Null))) -> do
       case e of
         Atom key -> do
-          put $ setEnvironment key env value
+          liftIO $ print $ "setting: " ++ key ++ " to: " ++ (show value)
+          put $ setParentEnvironment key env value
           return $ Atom key
         bindexpr -> lispEvalM bindexpr >>= \e -> case e of
           Atom key -> do
-            put $ setEnvironment key env value
+            liftIO $ print $ "setting: " ++ key ++ " to: " ++ (show value)
+            put $ setParentEnvironment key env value
+            get >>= liftIO . print
             return $ Atom key
           _ -> error $ "Invalid binding."
-    (Atom a) -> case getEnvironment a env of -- environment lookup
+    (Atom a) -> do
+      liftIO $ print $ "looking up " ++ a ++ "..."
+      liftIO $ print env
+      
+      case getEnvironment a env of -- environment lookup
                     Just lkup -> return lkup
-                    Nothing -> error $ "Binding not found: " ++ a
+                    Nothing -> error $ "Binding not found: " ++ a ++ " in: " ++ (show env)
     
     (Cell (Atom a) e) -> lispEvalM (Atom a) >>= \a' -> lispEvalM $ Cell a' e
 
     (Cell (Procedure procenv argNames bodies) e) -> do
-      liftIO $ last <$> mapM f bodies
+      evaledArgs <- (mapM lispEvalM (fromConsList e))
+      -- newEnv <- liftIO $ (childEnvironment procenv argNames) <$> (mapM (flip lispEval $ procenv) (fromConsList e))
+      
+      liftIO $ do
+        putStrLn "--------------------------------------------"
+        putStrLn $ "Evaluating procedure " ++ (show (Procedure procenv argNames bodies))
+        putStrLn "--------------------------------------------"
+        
+      last <$> mapM (f evaledArgs) bodies
         where
-          args = fromConsList e
-          newEnv = (childEnvironment procenv argNames args)
-          f a = lispEval a newEnv
+          f :: [Expression] -> Expression -> Felony Expression
+          f args a = do
+            env <- get
+            (ret, renv) <- liftIO $ lispEvalEnvironment a (childEnvironment env argNames args)
+            case (parent (renv :: Environment)) of
+              Just parentEnv -> (liftIO $ print "shit yeah") >> put parentEnv
+              Nothing -> return ()
+            -- put $ ((snd tpl) :: Environment)
+            return ret
           
     -- general evaluation
     (Cell a e) -> lispEvalM a >>= \a' -> lispEvalM $ Cell a' e
@@ -284,7 +319,25 @@ lispEvalM expr = do
     
     -- invalid form catchall
     e -> error $ "Invalid form: " ++ (show e)
-    
+
+-------------------------------------------------------------------------------
+-- | higher order functions implemented using Expression
+
+lispFoldl :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
+lispFoldl f z Null = z
+lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
+
+-------------------------------------------------------------------------------
+-- | Felony helper functions
+
+-- I know how hacky this is. Shut up.
+lispMath :: (Double -> Double -> Double) -> Expression -> Expression -> Expression
+lispMath f (Integer o) (Integer p) = Integer $ truncate (f (fromIntegral o) (fromIntegral p))
+lispMath f (Integer a) (Real b)    = Real (f (fromIntegral a) b)
+lispMath f (Real a)    (Integer b) = Real (f a (fromIntegral b))
+lispMath f (Real a)    (Real b)    = Real (f a b)
+lispMath _ _        _              = error "Cannot perform math with non-numeric expression."
+
 append :: Expression -> Expression -> Expression
 append Null b = Cell b Null
 append (Cell x xs) b = Cell x (append xs b)
@@ -299,14 +352,15 @@ fromConsList Null = []
 fromConsList (Cell a b) = a:fromConsList b
 fromConsList e = error $ "Not a cons list: " ++ (show e)
 
-numerify :: Expression -> Double
-numerify (Integer v) = fromIntegral v
-numerify (Real v) = v
-numerify expr = error $ "Invalid number: " ++ (show expr)
+isConsList :: Expression -> Bool
+isConsList Null = True
+isConsList (Cell a b) = True == (isConsList b)
+isConsList _ = False
 
--------------------------------------------------------------------------------
--- | higher order functions implemented using Expression
+lispAtomValue :: Expression -> String
+lispAtomValue (Atom a) = a
+lispAtomValue e = error $ "Not an atom: " ++ (show e)
 
-lispFoldl :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
-lispFoldl f z Null = z
-lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
+lispStringValue :: Expression -> String
+lispStringValue (String s) = s
+lispStringValue e = error $ "Not a string: " ++ (show e)

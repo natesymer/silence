@@ -13,12 +13,13 @@ Felony is not a finished language, and is far from production-ready.
 
 **Language**
 
-1. More concurrency features (thread objects)
+1. More concurrency features (thread data type)
 2. Modules (? don't know if possible ?)
 3. Functional language features
 4. decisions about toplevel evaluation (should it be wrapped in a begin call?)
 5. Standard library
 6. New function definition syntax
+7. Environment data types for passing around environments
 
 **Parsing**
 
