@@ -1,2 +1,3 @@
 (bind! beginPure (lambda (*) ((lambda () *))))
 (bind! a "thisisastring")
+(bind! append (lambda (one two) (if (== one '()) two (cons (car one) (append (cdr one) two)))))

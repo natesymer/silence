@@ -152,7 +152,7 @@ parseCode = manyTill parseExpr eof
 -- | Display
 
 instance Show Expression where
-  show (Cell (Atom "quote") e) = "'" ++ show e
+  show (Cell (Atom "quote") (Cell e Null)) = "'" ++ show e
   show (Atom x) = x
   show (String x) = "\"" ++ x ++ "\""
   show (Integer x) = show x
@@ -185,11 +185,9 @@ evalProgram str = catch
 -- reads lisp code into an AST
 lispReadFile :: String -> Expression
 lispReadFile "" = Null
-lispReadFile input = case parse parseCode "" input of
-  Left err -> error $ "Invalid syntax " ++ show err
-  Right [] -> Null
-  Right [e] -> e
-  Right es -> (Cell (Atom "begin") (toConsList es))
+lispReadFile input = case lispRead input of
+  [e] -> e
+  es -> (Cell (Atom "begin") (toConsList es))
   
 lispRead :: String -> [Expression]
 lispRead "" = []
@@ -217,7 +215,7 @@ lispEvalM expr = do
   env <- get
   case expr of
     -- import
-    (Cell (Atom "eval") (Cell (String code) Null)) -> ((\e -> putStrLn $ "EXPRESSION: " ++ (show e)) <$> (lispSequence $ lispRead code)) >> return Null
+    (Cell (Atom "eval") (Cell (String code) Null)) -> ((lispSequence $ lispRead code) >>= (\e -> liftIO $ putStrLn $ "EXPRESSION: " ++ (show e))) >> return Null
     (Cell (Atom "import") (Cell (String a) Null)) -> (liftIO $ readFile a) >>= lispSequence . lispRead
     
     
@@ -228,6 +226,10 @@ lispEvalM expr = do
     (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell iffalse _)))) -> lispEvalM iffalse 
     (Cell (Atom "if") (Cell (Bool True) (Cell iftrue _))) -> lispEvalM iftrue
     (Cell (Atom "if") _) -> error "Invalid special form: if."
+    (Cell (Atom "not") (Cell e Null)) -> lispEvalM e >>= \ev -> case ev of
+      (Bool True)  -> return $ Bool False
+      (Bool False) -> return $ Bool True
+      _            -> error $ "Expression is not a bool."
       
     -- cons & car
     (Cell (Atom "cons") (Cell a (Cell b Null))) -> Cell <$> (lispEvalM a) <*> (lispEvalM b) -- TODO: Fix cons lists
@@ -298,7 +300,7 @@ lispEvalM expr = do
       case e of
         Atom key -> do
           put $ setParentEnvironment key env value
-          return $ Cell (Atom "quote") (Cell (Atom key) Null)
+          return $ Cell (Atom "quote") (Cell e Null)
         bindexpr -> lispEvalM bindexpr >>= \e -> case e of
           Atom key -> do
             put $ setParentEnvironment key env value
