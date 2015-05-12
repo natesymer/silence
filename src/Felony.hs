@@ -171,8 +171,8 @@ showCell True  c@(Cell a Null)         = "(" ++ (showCell False c)
 showCell False   (Cell a Null)         = (show a) ++ (showCell False Null)
 showCell True  c@(Cell a b@(Cell _ _)) = "(" ++ (showCell False c)
 showCell False   (Cell a b@(Cell _ _)) = (show a) ++ " " ++ (showCell False b)
-showCell _     (Cell a b)            = "(" ++ (show a) ++ " . " ++ (show b) ++ ")"
-showCell _     _                     = error "Invalid cons cell."
+showCell _       (Cell a b)            = "(" ++ (show a) ++ " . " ++ (show b) ++ ")"
+showCell _       _                     = error "Invalid cons cell."
 
 -------------------------------------------------------------------------------
 -- | Felony core
@@ -211,11 +211,14 @@ lispChildEnvEvalM expr = do
 
 lispEvalM :: Expression -> Felony Expression
 lispEvalM expr = do
- -- liftIO $ print expr
+  liftIO $ print expr
   env <- get
   case expr of
     -- import
-    (Cell (Atom "eval") (Cell (String code) Null)) -> ((lispSequence $ lispRead code) >>= (\e -> liftIO $ putStrLn $ "EXPRESSION: " ++ (show e))) >> return Null
+    -- TODO: these two are horribly broken
+    -- (begin (eval "(bind! a 1) (display a)") (display a)) 
+    -- the second display statement doesn't work
+    (Cell (Atom "eval") (Cell (String code) Null)) -> (lispSequence $ lispRead code)
     (Cell (Atom "import") (Cell (String a) Null)) -> (liftIO $ readFile a) >>= lispSequence . lispRead
     
     
@@ -300,13 +303,13 @@ lispEvalM expr = do
       case e of
         Atom key -> do
           put $ setParentEnvironment key env value
+          get >>= liftIO . print 
           return $ Cell (Atom "quote") (Cell e Null)
-        bindexpr -> lispEvalM bindexpr >>= \e -> case e of
-          Atom key -> do
-            put $ setParentEnvironment key env value
-            return $ Cell (Atom "quote") (Cell (Atom key) Null)
-          _ -> error $ "Invalid binding."
-    (Atom a) -> case getEnvironment a env of -- environment lookup
+        raw@(Cell _ _) -> lispEvalM raw >>= \e -> lispEvalM $ Cell (Atom "bind!") (Cell e (Cell value Null))
+        _ -> error $ "Invalid binding."
+    (Atom a) -> do
+      get >>= liftIO . print . ((++) "Looking up: ") . show
+      case getEnvironment a env of -- environment lookup
                     Just lkup -> return lkup
                     Nothing -> error $ "Binding not found: " ++ a
     
@@ -345,16 +348,16 @@ lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
 -- | Felony helper functions
 
 lispSequence :: [Expression] -> Felony Expression
-lispSequence bodies = last <$> mapM f bodies
-  where 
-    f :: Expression -> Felony Expression
-    f a = do
-      env <- get
-      (ret, renv) <- liftIO $ lispEvalEnvironment a $ extendEnvironment env emptyEnvironment
-      case parent renv of
-        Just parentEnv -> put parentEnv
-        Nothing -> return ()
-      return ret
+lispSequence bodies = last <$> mapM lispSeqStep bodies
+
+lispSeqStep :: Expression -> Felony Expression
+lispSeqStep a = do
+  env <- get
+  (ret, renv) <- liftIO $ lispEvalEnvironment a $ childEnvironment env [] []
+  case parent renv of
+    Just penv -> put penv
+    Nothing -> return ()
+  return ret
 
 -- I know how hacky this is. Shut up.
 lispMath :: (Double -> Double -> Double) -> Expression -> Expression -> Expression
