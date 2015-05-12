@@ -17,9 +17,7 @@ data Expression = Atom String
                 | Bool Bool
                 | Procedure Environment [String] [Expression]
                 | Null
-                | Cell Expression Expression deriving (Eq, Show)
-
--- TODO: Fix issue with parsing Reals vs Integers
+                | Cell Expression Expression deriving (Eq)
 
 getAtom :: Expression -> String
 getAtom (Atom a) = a
@@ -29,6 +27,16 @@ data Environment = Environment {
   bindings :: M.Map String Expression,
   parent :: Maybe Environment
 } deriving (Eq, Show)
+
+-------------------------------------------------------------------------------
+-- | General
+
+infiniteBicompare :: (Eq a) => (a -> a -> Bool) -> [a] -> Bool
+infiniteBicompare _ [] = True
+infiniteBicompare _ [x] = True
+infiniteBicompare f (x:y:rest)
+ | f x y = infiniteBicompare f (y:rest)
+ | otherwise = False
 
 -------------------------------------------------------------------------------
 -- | Environment
@@ -98,13 +106,12 @@ parseAtom = do
              "#t" -> Bool True
              "#f" -> Bool False
              atom -> Atom atom
-                          
-parseInteger :: Parser Expression
-parseInteger = fmap (Integer . read) $ many1 digit
 
--- TODO: invalid
-parseReal :: Parser Expression
-parseReal = fmap (Real . read) $ many1 (digit <|> (char '.'))
+parseNumber :: Parser Expression
+parseNumber = (many1 digit) `sepBy1` (char '.') >>= \halves -> case halves of
+  [x,y] -> return $ Real $ read $ x ++ "." ++ y
+  [x] -> return $ Integer $ read x
+  _ -> error "Invalid number."
 
 parseQuoted :: Parser Expression
 parseQuoted = do
@@ -128,22 +135,33 @@ parseDottedList = do
     return $ Cell (head h) t
 
 parseExpr :: Parser Expression
-parseExpr = (parseAtom <|> parseString <|> parseReal <|> parseInteger <|> parseQuoted <|> parseList <|> fail "invalid syntax.")
+parseExpr = (parseAtom <|> parseString <|> parseNumber <|> parseQuoted <|> parseList <|> fail "invalid syntax.")
 
 -------------------------------------------------------------------------------
 -- | Lisp core
 
--- print a lisp expression as-is to the console
-lispShow :: Expression -> String
-lispShow (Atom x) = x
-lispShow (String x) = "\"" ++ x ++ "\""
-lispShow (Integer x) = show x
-lispShow (Real x) = show x
-lispShow Null = "'()"
-lispShow (Cell a b) = "(" ++ (lispShow a) ++ " " ++ (lispShow b) ++ ")"
-lispShow (Bool True) = "#t"
-lispShow (Bool False) = "#f"
-lispShow (Procedure _ _ _) = "procedure"
+instance Show Expression where
+  show (Atom x) = x
+  show (String x) = "\"" ++ x ++ "\""
+  show (Integer x) = show x
+  show (Real x) = show x
+  show Null = "'()"
+  show c@(Cell a b) = showCell c--"(" ++ (show a) ++ " " ++ (show b) ++ ")"
+  show (Bool True) = "#t"
+  show (Bool False) = "#f"
+  show (Procedure _ argsnames expressions) = show (Cell (Atom "procedure") (Cell (toConsList (map Atom argsnames)) (toConsList expressions)))
+  
+showCell :: Expression -> String
+showCell = (showCell' True)
+  
+-- Bool is hasLeadingParen
+showCell' :: Bool -> Expression  -> String
+showCell' True  (Cell a Null)         = "(" ++ (show a) ++ ")"
+showCell' False (Cell a Null)         = (show a) ++ ")"
+showCell' True  (Cell a b@(Cell _ _)) = "(" ++ (show a) ++ " " ++ (showCell' False b)
+showCell' False (Cell a b@(Cell _ _)) = (show a) ++ " " ++ (showCell' False b)
+showCell' _     (Cell a b)            = "(" ++ (show a) ++ " . " ++ (show b) ++ ")"
+showCell' _     _                     = error "Invalid cons cell."
 
 -- reads lisp code into an AST
 lispRead :: String -> Expression
@@ -204,17 +222,17 @@ lispEvalM expr = do
       (Cell _ _) -> return $ Bool True
       _          -> return $ Bool False
       
-    -- exprs that get translated into other exprs
-    --(Cell (Atom "begin") e) -> lispEvalM (Cell (Atom "lambda") (Cell Null e)) >>= lispEvalM -- just returns proc, need to evaluate it
+    -- exprs that get translated into other exprs    (lambda (() . ))
+    (Cell (Atom "begin") e) -> lispEvalM (Cell (Atom "lambda") (Cell Null e)) -- just returns proc, need to evaluate it
     (Cell (Atom "quote") (Cell e Null)) -> return e
     
     -- lambda
     (Cell (Atom "lambda") (Cell argnames bodies)) -> return $ Procedure env (map getAtom $ fromConsList argnames) (fromConsList bodies)
     (Cell (Atom "lambda") e) -> error $ "Invalid lambda: " ++ (show e)
     
-    -- TODO: `apply` function
-    
+    -- apply
     (Cell (Atom "apply") (Cell a (Cell e@(Cell _ _) Null))) -> lispEvalM e >>= \args -> lispEvalM (Cell a args)
+    (Cell (Atom "apply") _) -> error "Invalid special form: apply."
     
     -- math
     (Cell (Atom "+") (Cell h t)) -> lispFoldl (lispMath (+)) <$> (lispEvalM h) <*> (toConsList <$> (mapM lispEvalM (fromConsList t)))
@@ -292,27 +310,3 @@ numerify expr = error $ "Invalid number: " ++ (show expr)
 lispFoldl :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
 lispFoldl f z Null = z
 lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
-
-infiniteBicompare :: (Eq a) => (a -> a -> Bool) -> [a] -> Bool
-infiniteBicompare _ [] = True
-infiniteBicompare _ [x] = True
-infiniteBicompare f (x:y:rest)
- | f x y = infiniteBicompare f (y:rest)
- | otherwise = False
-
--- lispFoldr :: (Expression -> Expression -> Expression) -> Expression -> Expression -> Expression
--- lispFoldr f z Null = z
--- lispFoldr f z (Cell x xs) = f x (lispFoldr f z xs)
---
-lispMap :: (Expression -> Expression) -> Expression -> Expression
-lispMap f Null = Null
-lispMap f (Cell a b)  = (Cell (f a) (lispMap f b))
-lispMap f e = error $ "Not a list: " ++ (show e)
-
---
--- -- (apply + 1 2 3 4 5)
--- lispApply :: Expression -> Expression -> Expression
--- lispApply (Procedure env argslist bodies) args = lispBegin (zipEnvironment argslist (fromConsList args)) (toConsList bodies)
--- lispApply _ _ = error "Cannot evaluate non-procedure."
---
-
