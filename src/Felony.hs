@@ -7,6 +7,8 @@ import           Control.Concurrent
 import qualified Data.Map as M
 import           System.IO
 import           Text.ParserCombinators.Parsec as Parsec hiding (spaces)
+import           Control.Exception.Base
+import           GHC.IO.Exception
 
 type Felony a = StateT Environment IO a
 
@@ -175,14 +177,25 @@ showCell _     _                     = error "Invalid cons cell."
 -------------------------------------------------------------------------------
 -- | Felony core
 
+evalProgram :: String -> IO Expression
+evalProgram str = catch
+                    (lispEval (lispReadFile str) emptyEnvironment)
+                    (\e -> (flip lispEval $ emptyEnvironment) $ Cell (Atom "display") (Cell (String (show (e :: ErrorCall))) Null))
+
 -- reads lisp code into an AST
-lispRead :: String -> Expression
-lispRead "" = Null
-lispRead input = case parse parseCode "" input of
+lispReadFile :: String -> Expression
+lispReadFile "" = Null
+lispReadFile input = case parse parseCode "" input of
   Left err -> error $ "Invalid syntax " ++ show err
   Right [] -> Null
   Right [e] -> e
   Right es -> (Cell (Atom "begin") (toConsList es))
+  
+lispRead :: String -> [Expression]
+lispRead "" = []
+lispRead input = case parse parseCode "" input of
+  Left err -> error $ "Invalid syntax " ++ show err
+  Right e -> e
 
 lispEval :: Expression -> Environment -> IO Expression
 lispEval expr env = evalStateT (lispEvalM expr) env
@@ -200,15 +213,16 @@ lispChildEnvEvalM expr = do
 
 lispEvalM :: Expression -> Felony Expression
 lispEvalM expr = do
-  --liftIO $ print expr
+ -- liftIO $ print expr
   env <- get
   case expr of
     -- import
-    (Cell (Atom "import") e) -> do
-      codes <- (liftIO $ mapM readFile (map lispStringValue (fromConsList e)))
-      let exprs = map lispRead codes
-      mapM_ lispChildEnvEvalM exprs
-      return Null
+    (Cell (Atom "eval") (Cell (String code) Null)) -> ((\e -> putStrLn $ "EXPRESSION: " ++ (show e)) <$> (lispSequence $ lispRead code)) >> return Null
+    (Cell (Atom "import") (Cell (String a) Null)) -> (liftIO $ readFile a) >>= lispSequence . lispRead
+    
+    
+   -- (lispSequence [] []) <$> lispRead <$> (liftIO $ readFile a)
+    --(Cell (Atom "import") e) -> lispSequence [] [] $ (concat . (map lispRead)) <$> (liftIO $ mapM readFile (map lispStringValue $ fromConsList e))
     
     -- if
     (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell iffalse _)))) -> lispEvalM iffalse 
@@ -254,7 +268,7 @@ lispEvalM expr = do
 --     (Cell (Atom "s2a") (Cell (String s) _)) -> return $ Atom s
       
     -- exprs that get translated into other exprs    (lambda (() . ))
-    (Cell (Atom "begin") e) -> lispEvalM (Cell (Cell (Atom "lambda") (Cell Null e)) Null)
+    (Cell (Atom "begin") e) -> lispEvalM (Cell (Cell (Atom "lambda") (Cell Null e)) Null) -- begins a new scope
     (Cell (Atom "list") e) -> return e
     (Cell (Atom "quote") (Cell e Null)) -> return e
     
@@ -280,40 +294,29 @@ lispEvalM expr = do
     (Cell (Atom "display") (Cell e Null)) -> (lispEvalM e >>= liftIO . print) >> return Null
 
     -- environment operations
-    --(Cell (Atom "bind!") e) -> (liftIO $ print $ "bind! args" ++ (show e)) >> return Null
     (Cell (Atom "bind!") (Cell e (Cell value Null))) -> do
       case e of
         Atom key -> do
           put $ setParentEnvironment key env value
-          return $ Atom key
+          return $ Cell (Atom "quote") (Cell (Atom key) Null)
         bindexpr -> lispEvalM bindexpr >>= \e -> case e of
           Atom key -> do
             put $ setParentEnvironment key env value
-            return $ Atom key
+            return $ Cell (Atom "quote") (Cell (Atom key) Null)
           _ -> error $ "Invalid binding."
     (Atom a) -> case getEnvironment a env of -- environment lookup
                     Just lkup -> return lkup
-                    Nothing -> error $ "Binding not found: " ++ a ++ " in: " ++ (show env)
+                    Nothing -> error $ "Binding not found: " ++ a
     
     (Cell (Atom a) e) -> lispEvalM (Atom a) >>= \a' -> lispEvalM $ Cell a' e
 
     (Cell (Procedure procenv argNames bodies) e) -> do
       evaledArgs <- (mapM lispEvalM (fromConsList e))
       oldenv <- get
-      put procenv
-      evaluation <- last <$> mapM (f evaledArgs) bodies
+      put $ childEnvironment procenv argNames evaledArgs
+      evaluation <- lispSequence bodies
       put oldenv
       return evaluation
-      
-      where
-        f :: [Expression] -> Expression -> Felony Expression
-        f args a = do
-          env <- get
-          (ret, renv) <- liftIO $ lispEvalEnvironment a $ childEnvironment env argNames args
-          case parent renv of
-            Just parentEnv -> put parentEnv
-            Nothing -> return ()
-          return ret
           
     -- general evaluation
     (Cell a e) -> lispEvalM a >>= \a' -> lispEvalM $ Cell a' e
@@ -338,6 +341,18 @@ lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
 
 -------------------------------------------------------------------------------
 -- | Felony helper functions
+
+lispSequence :: [Expression] -> Felony Expression
+lispSequence bodies = last <$> mapM f bodies
+  where 
+    f :: Expression -> Felony Expression
+    f a = do
+      env <- get
+      (ret, renv) <- liftIO $ lispEvalEnvironment a $ extendEnvironment env emptyEnvironment
+      case parent renv of
+        Just parentEnv -> put parentEnv
+        Nothing -> return ()
+      return ret
 
 -- I know how hacky this is. Shut up.
 lispMath :: (Double -> Double -> Double) -> Expression -> Expression -> Expression

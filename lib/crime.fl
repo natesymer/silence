@@ -1,1 +1,2 @@
-(bind! 'beginPure (lambda (*) ((lambda () *))))
+(bind! beginPure (lambda (*) ((lambda () *))))
+(bind! a "thisisastring")

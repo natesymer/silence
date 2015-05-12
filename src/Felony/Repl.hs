@@ -5,13 +5,7 @@ import           Felony
 import           Control.Monad
 import           System.IO
 import           Control.Exception.Base
-import           System.IO.Error
 import           GHC.IO.Exception
-
-evalProgram :: String -> IO Expression
-evalProgram str = catch
-                    (lispEval (lispRead str) emptyEnvironment)
-                    (\e -> (flip lispEval $ emptyEnvironment) $ Cell (Atom "display") (Cell (String (show (e :: ErrorCall))) Null))
 
 catcher :: String -> IO Expression
 catcher errmsg = putStrLn errmsg >> return Null
