@@ -265,21 +265,14 @@ lispEvalM expr = do
     (Cell (Atom "bind!") (Cell e (Cell value Null))) -> do
       case e of
         Atom key -> do
-          liftIO $ print $ "setting: " ++ key ++ " to: " ++ (show value)
           put $ setParentEnvironment key env value
           return $ Atom key
         bindexpr -> lispEvalM bindexpr >>= \e -> case e of
           Atom key -> do
-            liftIO $ print $ "setting: " ++ key ++ " to: " ++ (show value)
             put $ setParentEnvironment key env value
-            get >>= liftIO . print
             return $ Atom key
           _ -> error $ "Invalid binding."
-    (Atom a) -> do
-      liftIO $ print $ "looking up " ++ a ++ "..."
-      liftIO $ print env
-      
-      case getEnvironment a env of -- environment lookup
+    (Atom a) -> case getEnvironment a env of -- environment lookup
                     Just lkup -> return lkup
                     Nothing -> error $ "Binding not found: " ++ a ++ " in: " ++ (show env)
     
@@ -287,24 +280,21 @@ lispEvalM expr = do
 
     (Cell (Procedure procenv argNames bodies) e) -> do
       evaledArgs <- (mapM lispEvalM (fromConsList e))
-      -- newEnv <- liftIO $ (childEnvironment procenv argNames) <$> (mapM (flip lispEval $ procenv) (fromConsList e))
+      oldenv <- get
+      put procenv
+      evaluation <- last <$> mapM (f evaledArgs) bodies
+      put oldenv
+      return evaluation
       
-      liftIO $ do
-        putStrLn "--------------------------------------------"
-        putStrLn $ "Evaluating procedure " ++ (show (Procedure procenv argNames bodies))
-        putStrLn "--------------------------------------------"
-        
-      last <$> mapM (f evaledArgs) bodies
-        where
-          f :: [Expression] -> Expression -> Felony Expression
-          f args a = do
-            env <- get
-            (ret, renv) <- liftIO $ lispEvalEnvironment a (childEnvironment env argNames args)
-            case (parent (renv :: Environment)) of
-              Just parentEnv -> (liftIO $ print "shit yeah") >> put parentEnv
-              Nothing -> return ()
-            -- put $ ((snd tpl) :: Environment)
-            return ret
+      where
+        f :: [Expression] -> Expression -> Felony Expression
+        f args a = do
+          env <- get
+          (ret, renv) <- liftIO $ lispEvalEnvironment a $ childEnvironment env argNames args
+          case parent renv of
+            Just parentEnv -> put parentEnv
+            Nothing -> return ()
+          return ret
           
     -- general evaluation
     (Cell a e) -> lispEvalM a >>= \a' -> lispEvalM $ Cell a' e
