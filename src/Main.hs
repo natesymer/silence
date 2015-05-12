@@ -4,17 +4,16 @@ import Felony
 import Felony.Repl
 import System.IO
 import System.Environment
+import Control.Monad
 
 main :: IO ()
 main = getArgs >>= procArgs
 
-evalProgram :: String -> IO Expression
-evalProgram = lispEvalToplevel . lispRead
-
 procArgs :: [String] -> IO ()
+procArgs [] = procArgs ["-r"]
 procArgs ["-r"] = Felony.Repl.terminalRepl "𝝺 "
 procArgs ["-ep", code] = evalProgram code >>= print
-procArgs ["-e", code] = seq (evalProgram code) return ()
+procArgs ["-e", code] = void $ evalProgram code
 procArgs ["-f", fp] = readFile fp >>= \c -> procArgs ["-e", c]
 procArgs ["-fp", fp] = readFile fp >>= \c -> procArgs ["-ep", c]
 procArgs _ = (putStrLn "Invalid arguments") >> printHelp

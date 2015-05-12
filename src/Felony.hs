@@ -139,28 +139,36 @@ parseDottedList = do
     return $ Cell (head h) t
 
 parseExpr :: Parser Expression
-parseExpr = (parseAtom <|> parseString <|> parseNumber <|> parseQuoted <|> parseList <|> fail "invalid syntax.")
+parseExpr = do
+  skipMany space
+  (parseAtom <|> parseString <|> parseNumber <|> parseQuoted <|> parseList <|> fail "invalid syntax.")
+
+parseCode :: Parser [Expression]
+parseCode = manyTill parseExpr eof
 
 -------------------------------------------------------------------------------
 -- | Display
 
 instance Show Expression where
+  show (Cell (Atom "quote") e) = "'" ++ show e
   show (Atom x) = x
   show (String x) = "\"" ++ x ++ "\""
   show (Integer x) = show x
   show (Real x) = show x
-  show Null = "'()"
-  show c@(Cell a b) = showCell True c
+  show Null = showCell True Null
+  show c@(Cell _ _) = showCell True c
   show (Bool True) = "#t"
   show (Bool False) = "#f"
   show (Procedure _ argsnames expressions) = show (Cell (Atom "procedure") (Cell (toConsList (map Atom argsnames)) (toConsList expressions)))
 
 -- Bool is hasLeadingParen
 showCell :: Bool -> Expression  -> String
-showCell True  (Cell a Null)         = "(" ++ (show a) ++ ")"
-showCell False (Cell a Null)         = (show a) ++ ")"
-showCell True  (Cell a b@(Cell _ _)) = "(" ++ (show a) ++ " " ++ (showCell False b)
-showCell False (Cell a b@(Cell _ _)) = (show a) ++ " " ++ (showCell False b)
+showCell True    Null                  = "()"
+showCell False   Null                  = ")"
+showCell True  c@(Cell a Null)         = "(" ++ (showCell False c)
+showCell False   (Cell a Null)         = (show a) ++ (showCell False Null)
+showCell True  c@(Cell a b@(Cell _ _)) = "(" ++ (showCell False c)
+showCell False   (Cell a b@(Cell _ _)) = (show a) ++ " " ++ (showCell False b)
 showCell _     (Cell a b)            = "(" ++ (show a) ++ " . " ++ (show b) ++ ")"
 showCell _     _                     = error "Invalid cons cell."
 
@@ -170,12 +178,11 @@ showCell _     _                     = error "Invalid cons cell."
 -- reads lisp code into an AST
 lispRead :: String -> Expression
 lispRead "" = Null
-lispRead input = case parse parseExpr "" input of
+lispRead input = case parse parseCode "" input of
   Left err -> error $ "Invalid syntax " ++ show err
-  Right val -> val
-
-lispEvalToplevel :: Expression -> IO Expression
-lispEvalToplevel expr = lispEval (Cell (Atom "begin") (Cell expr Null)) emptyEnvironment
+  Right [] -> Null
+  Right [e] -> e
+  Right es -> (Cell (Atom "begin") (toConsList es))
 
 lispEval :: Expression -> Environment -> IO Expression
 lispEval expr env = evalStateT (lispEvalM expr) env
@@ -183,15 +190,24 @@ lispEval expr env = evalStateT (lispEvalM expr) env
 lispEvalEnvironment :: Expression -> Environment -> IO (Expression, Environment)
 lispEvalEnvironment expr env = runStateT (lispEvalM expr) env
 
+lispChildEnvEvalM :: Expression -> Felony Expression
+lispChildEnvEvalM expr = do
+  env <- get
+  put $ extendEnvironment env emptyEnvironment
+  ret <- lispEvalM expr
+  put env
+  return ret
+
 lispEvalM :: Expression -> Felony Expression
 lispEvalM expr = do
+  --liftIO $ print expr
   env <- get
   case expr of
     -- import
     (Cell (Atom "import") e) -> do
       codes <- (liftIO $ mapM readFile (map lispStringValue (fromConsList e)))
       let exprs = map lispRead codes
-      mapM_ lispEvalM exprs
+      mapM_ lispChildEnvEvalM exprs
       return Null
     
     -- if
@@ -229,14 +245,16 @@ lispEvalM expr = do
       _                   -> return $ Bool False
     (Cell (Atom "list?") (Cell lst Null)) -> Bool <$> (lispEvalM lst >>= return . isConsList)
     
-    -- atom to string
+    -- atom <-> string
     -- TODO: evaluate!!!
     --(Cell (Atom "a2s") (Cell (Atom "quote") (Cell (Atom s) _))) -> return $ String s
-    (Cell (Atom "a2s") (Cell (Cell (Atom "quote") (Cell (Atom a) Null)) Null)) -> return $ String a -- ((quote asdf))
-    (Cell (Atom "s2a") (Cell (String s) _)) -> return $ Atom s
+    
+    
+    -- (Cell (Atom "a2s") (Cell (Cell (Atom "quote") (Cell (Atom a) Null)) Null)) -> return $ String a -- ((quote asdf))
+--     (Cell (Atom "s2a") (Cell (String s) _)) -> return $ Atom s
       
     -- exprs that get translated into other exprs    (lambda (() . ))
-    (Cell (Atom "begin") e) -> lispEvalM (Cell (Cell (Atom "lambda") (Cell Null e)) Null) -- just returns proc, need to evaluate it
+    (Cell (Atom "begin") e) -> lispEvalM (Cell (Cell (Atom "lambda") (Cell Null e)) Null)
     (Cell (Atom "list") e) -> return e
     (Cell (Atom "quote") (Cell e Null)) -> return e
     
@@ -262,6 +280,7 @@ lispEvalM expr = do
     (Cell (Atom "display") (Cell e Null)) -> (lispEvalM e >>= liftIO . print) >> return Null
 
     -- environment operations
+    --(Cell (Atom "bind!") e) -> (liftIO $ print $ "bind! args" ++ (show e)) >> return Null
     (Cell (Atom "bind!") (Cell e (Cell value Null))) -> do
       case e of
         Atom key -> do

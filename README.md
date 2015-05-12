@@ -13,16 +13,29 @@ Felony is not a finished language, and is far from production-ready.
 
 **Language**
 
-1. More concurrency features (thread data type)
-2. Modules (? don't know if possible ?)
-3. Functional language features
-4. decisions about toplevel evaluation (should it be wrapped in a begin call?)
-5. Standard library
-6. New function definition syntax
-7. Environment data types for passing around environments
+1. More data types
+	1. Thread (allows for comprehensive concurrency support)
+	2. Environment (eval expr in a different environment)
+2. Standard library
+	1. higher order funcs
+	2. convenience shit (cond, function definition syntax, etc)
+3. Environment data types for passing around environments
 
-**Parsing**
+**Parser**
 
 1. Comments
 2. Fix issues with dotted lists
-3. Real vs Integer parsing issue
+
+### What's actually done
+
+1. Basic parsing. Everything but dotted pairs parses.
+2. Math & equality
+3. Environments
+4. Code loading
+5. Cons cell ops
+6. Misc (printing, threading, etc)
+
+### Needs improvement
+
+1. All math is done by first converting a number to a double. This sucks.
+2. Make special forms as non-special as possible
