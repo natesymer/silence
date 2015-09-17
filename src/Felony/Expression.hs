@@ -1,16 +1,25 @@
 module Felony.Expression
 (
   Expression(..),
-  
+  Environment,
   isConsList,
   fromConsList,
   toConsList,
-  showExpr,
-  module Felony.Types
+  showExpr
 )
 where
 
-import Felony.Types
+import Data.HashMap.Strict (HashMap)
+
+type Environment = [HashMap String Expression]
+data Expression = Atom String
+                | String String
+                | Integer Integer
+                | Real Double
+                | Bool Bool
+                | Procedure Environment [String] [Expression]
+                | Null
+                | Cell Expression Expression deriving (Eq, Show)
                 
 -- TODO: Rewrite show as as builders
                 

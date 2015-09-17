@@ -5,16 +5,17 @@ module Felony.Evaluation
 )
 where
   
-import Felony.Types
-import Felony.Environment
 import Felony.Expression
 import Felony.Parser
+import Felony.Monad
 import Control.Concurrent
 
 import           Control.Monad
 import           Control.Monad.State.Strict
 import           Control.Exception.Base
 import System.Environment
+
+import qualified Data.HashMap.Strict as H
 
 import Data.Default
 
@@ -52,17 +53,17 @@ lispFoldl f z (Cell x xs) = lispFoldl f (f z x) xs
 
 -------------------------------------------------------------------------------
 -- | Felony helper functions
-
-lispSequence :: [Expression] -> Felony Expression
-lispSequence bodies = last <$> mapM step bodies
-  where
-    step a = do
-      env <- get
-      (ret, renv) <- liftIO $ lispEvalEnvironment a $ mkChildEnv env
-      case envParent renv of
-        Just e -> put e
-        Nothing -> return ()
-      return ret
+--
+-- lispSequence :: [Expression] -> Felony Expression
+-- lispSequence bodies = last <$> mapM step bodies
+--   where
+--     step a = do
+--       env <- get
+--       (ret, renv) <- liftIO $ lispEvalEnvironment a $ mkChildEnv env
+--       case envParent renv of
+--         Just e -> put e
+--         Nothing -> return ()
+--       return ret
 
 -- I know how hacky this is. Shut up.
 lispMath :: (Double -> Double -> Double) -> Expression -> Expression -> Expression
@@ -80,7 +81,6 @@ lispStringValue :: Expression -> String
 lispStringValue (String s) = s
 lispStringValue e = error $ "Not a string: " ++ (show e)
 
-
 lispEval :: Expression -> Environment -> IO Expression
 lispEval expr env = evalStateT (lispEvalM expr) env
 
@@ -91,7 +91,11 @@ lispChildEvalM :: Expression -> Felony Expression
 lispChildEvalM expr = do
   state (\s -> (def { envParent = (Just s) }, s))
   lispEvalM expr
+  
+lispInsertEnv :: String -> Expression -> Felony Expression
+lispInsertEnv k v = state (\s -> (def { envBindings = H.insert k v (envParent s) }, s))
 
+-- TODO: atom to string conversion
 lispEvalM :: Expression -> Felony Expression
 lispEvalM expr = traceShow expr >> ((flip eval' $ expr) =<< get)
   where
@@ -102,12 +106,8 @@ lispEvalM expr = traceShow expr >> ((flip eval' $ expr) =<< get)
         -- TODO: these two are horribly broken
         -- (begin (eval "(bind! a 1) (display a)") (display a)) 
         -- the second display statement doesn't work
-        (Cell (Atom "eval") (Cell (String code) Null)) -> (lispSequence $ lispRead code)
+        (Cell (Atom "eval") (Cell (String code) Null)) -> lispEvalM $ Procedure env [] (fromConsList $ lispRead code)
         (Cell (Atom "import") (Cell (String a) Null)) -> (liftIO $ readFile a) >>= lispSequence . lispRead
-        
-        
-       -- (lispSequence [] []) <$> lispRead <$> (liftIO $ readFile a)
-        --(Cell (Atom "import") e) -> lispSequence [] [] $ (concat . (map lispRead)) <$> (liftIO $ mapM readFile (map lispStringValue $ fromConsList e))
         
         -- if
         (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell iffalse _)))) -> lispEvalM iffalse 
@@ -147,14 +147,6 @@ lispEvalM expr = traceShow expr >> ((flip eval' $ expr) =<< get)
           (Cell _ _)          -> return $ Bool True
           _                   -> return $ Bool False
         (Cell (Atom "list?") (Cell lst Null)) -> Bool <$> (lispEvalM lst >>= return . isConsList)
-        
-        -- atom <-> string
-        -- TODO: evaluate!!!
-        --(Cell (Atom "a2s") (Cell (Atom "quote") (Cell (Atom s) _))) -> return $ String s
-        
-        
-        -- (Cell (Atom "a2s") (Cell (Cell (Atom "quote") (Cell (Atom a) Null)) Null)) -> return $ String a -- ((quote asdf))
---         (Cell (Atom "s2a") (Cell (String s) _)) -> return $ Atom s
           
         -- exprs that get translated into other exprs    (lambda (() . ))
         (Cell (Atom "begin") e) -> lispEvalM (Cell (Cell (Atom "lambda") (Cell Null e)) Null) -- begins a new scope
@@ -181,35 +173,39 @@ lispEvalM expr = traceShow expr >> ((flip eval' $ expr) =<< get)
         -- IO-related
         (Cell (Atom "fork") e) -> (liftIO $ void $ forkOS $ void $ lispEval e env) >> return Null
         (Cell (Atom "display") (Cell e Null)) -> (lispEvalM e >>= liftIO . print) >> return Null
-      
-        -- environment operations
-        (Cell (Atom "bind!") (Cell e (Cell value Null))) -> do
-          case e of
-            Atom key -> do
-              put $ (Environment (Just $ envParent env) ) -- setParentEnvironment key env value
-              get >>= liftIO . print 
-              return $ Cell (Atom "quote") (Cell e Null)
-            raw@(Cell _ _) -> lispEvalM raw >>= \e -> lispEvalM $ Cell (Atom "bind!") (Cell e (Cell value Null))
-            _ -> error $ "Invalid binding."
-        (Atom a) -> do
-          get >>= liftIO . print . ((++) "Looking up: ") . show
-          case getEnvironment a env of -- environment lookup
-                        Just lkup -> return lkup
-                        Nothing -> error $ "Binding not found: " ++ a
         
-        (Cell (Atom a) e) -> lispEvalM (Atom a) >>= \a' -> lispEvalM $ Cell a' e
-      
+        (Cell (Atom "bind!") (Cell (Atom key) (Cell value Null))) -> do
+          put $ (H.insert key value $ head env):(tail env) -- originally set (k, v) in parent env
+          get >>= liftIO . print 
+          return $ Cell (Atom "quote") (Cell value Null)
+        (Cell (Atom "bind!") (Cell raw@(Cell _ _) (Cell v Null))) -> lispEvalM raw >>= \e -> lispEvalM $ Cell (Atom "bind!") (Cell e (Cell v Null))
+        (Cell (Atom "bind!") (Cell _ (Cell value Null))) -> error $ "Invalid binding."
+
+        -- env lookup
+        (Atom key) -> case H.lookup key $ head env of
+          Just lkup -> return lkup
+          Nothing -> error $ "Binding not found: " ++ key
+
+        -- Procedure calling
+        (Cell fname@(Atom a) args) = do
+          proc <- lispEvalM fname
+          case proc of
+            Procedure _ _ _ -> lispEvalM $ Cell proc args
+            _ -> error $ a ++ " is not a procedure."
+        
+        -- Procedure evaluation
         (Cell (Procedure procenv argNames bodies) e) -> do
-          evaledArgs <- (mapM lispChildEvalM (fromConsList e))
-          oldenv <- get
-          put $ mkEnv (Just procenv) argNames evaledArgs
-          evaluation <- lispSequence bodies
-          put oldenv
+          evaledArgs <- liftIO $ mapM (flip lispEvalEnvironment $ procenv) (fromConsList e)
+          state $ statePushChild evaledArgs
+          evaluation <- mapM lispEvalM bodies
+          state statePopChild
           return evaluation
-              
-        -- general evaluation
-        (Cell a e) -> lispEvalM a >>= \a' -> lispEvalM $ Cell a' e
-      
+          where
+            statePushChild env s = env:s
+            statePopChild [] = [H.empty]
+            statePopChild [x] = [x]
+            statePopChild (_:xs) = xs
+        
         -- fall through for literals
         (Integer _) -> return expr
         (String _) -> return expr
