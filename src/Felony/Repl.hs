@@ -2,7 +2,7 @@
 
 module Felony.Repl where
 import           Felony
-import           Control.Monad
+-- import           Felony.Expression
 import           System.IO
 import           Control.Exception.Base
 import           GHC.IO.Exception

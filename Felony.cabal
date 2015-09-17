@@ -15,8 +15,10 @@ executable felony
   hs-source-dirs:    src
   ghc-options:       -threaded -Wall -fwarn-tabs -fno-warn-orphans -fno-warn-unused-do-bind -O
   build-depends:     base,
+                     data-default,
                      parsec,
                      containers,
+                     unordered-containers,
                      transformers,
                      mtl
 
