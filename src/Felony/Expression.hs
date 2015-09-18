@@ -1,3 +1,5 @@
+{-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
+
 module Felony.Expression
 (
   Expression(..),
@@ -11,7 +13,8 @@ where
 
 import Data.HashMap.Strict (HashMap)
 
-type Environment = [HashMap String Expression]
+type Environment = [HashMap String Expression] -- deriving (Eq, Show)
+
 data Expression = Atom String
                 | String String
                 | Integer Integer
@@ -33,23 +36,21 @@ showExpr (Atom x) = x
 showExpr (String x) = "\"" ++ x ++ "\""
 showExpr (Integer x) = show x
 showExpr (Real x) = show x
-showExpr Null = showCell True Null
-showExpr c@(Cell _ _) = showCell True c
+showExpr Null = showCell Null
+showExpr c@(Cell _ _) = showCell c
 showExpr (Bool True)  = "#t"
 showExpr (Bool False) = "#f"
-showExpr (Procedure _ argnames expressions) = mconcat $ "<<procedure: ":argnames
+showExpr (Procedure _ argnames _) = mconcat $ "<<procedure: ":argnames
 
--- TODO: This sucks
--- Bool is hasLeadingParen
-showCell :: Bool -> Expression  -> String
-showCell True    Null                  = "()"
-showCell False   Null                  = ")"
-showCell True  c@(Cell a Null)         = '(':(showCell False c)
-showCell False   (Cell a Null)         = mconcat [show a, showCell False Null]
-showCell True  c@(Cell a b@(Cell _ _)) = '(':(showCell False c)
-showCell False   (Cell a b@(Cell _ _)) = mconcat [show a, " ", showCell False b]
-showCell _       (Cell a b)            = mconcat ["(", show a, " . ", show b, ")"]
-showCell _       _                     = error "Invalid cons cell."
+showCell :: Expression -> String
+showCell x = "(" ++ f x ++ ")"
+  where
+    f Null = "" 
+    f (Cell a Null) = showExpr a
+    f (Cell a b@(Cell _ _)) = mconcat [showExpr a, " ", f b]
+    f (Cell a b) = mconcat [showExpr a, " . ", showExpr b]
+    f _ = error "Invalid list."
+    
 
 toConsList :: [Expression] -> Expression
 toConsList [] = Null
@@ -64,12 +65,12 @@ fromConsList e = f e []
 
 isConsList :: Expression -> Bool
 isConsList Null = True
-isConsList (Cell a b) = isConsList b
+isConsList (Cell _ b) = isConsList b
 isConsList _ = False
 
 append :: Expression -> Expression -> Expression
 append a b = f a b
   where
-    f Null b = Cell b Null
-    f (Cell x xs) b = Cell x (append xs b)
-    f a b = Cell a (Cell b Null)
+    f Null xpr = Cell xpr Null
+    f (Cell x xs) bxpr = Cell x (append xs bxpr)
+    f axpr bxpr = Cell axpr (Cell bxpr Null)

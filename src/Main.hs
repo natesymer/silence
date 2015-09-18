@@ -2,7 +2,6 @@
 
 import Felony
 import Felony.Repl
-import System.IO
 import System.Environment
 import Control.Monad
 
