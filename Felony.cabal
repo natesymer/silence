@@ -20,6 +20,8 @@ executable felony
                      containers,
                      unordered-containers,
                      transformers,
-                     mtl
+                     mtl,
+                     vector,
+                     stm
 
   

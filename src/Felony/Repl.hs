@@ -18,7 +18,7 @@ repl outp inp prompt = do
     Left (IOError _ EOF _ _ _ _) -> return ()
     Left (IOError _ _ _ errormessage _ _) -> hPutStrLn outp $ "Error: " ++ errormessage
     Right str -> do
-      evalProgram str >>= (hPrint outp)
+      evalCode str >>= (hPrint outp)
       repl outp inp prompt
       
 terminalRepl :: String -> IO ()
