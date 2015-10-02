@@ -36,7 +36,7 @@ data Expression = Atom String
                 deriving (Show)
          
 createEnv :: IO Environment
-createEnv = V.new 0       
+createEnv = V.unsafeNew 0       
 
 unsafeCreateEnv :: Environment
 unsafeCreateEnv = unsafePerformIO $ createEnv
