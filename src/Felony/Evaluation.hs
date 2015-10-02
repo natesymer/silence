@@ -112,7 +112,8 @@ evalM (Cell (Atom "pair?") (Cell e Null)) = f <$> evalM e
 evalM (Cell (Atom "list?") (Cell e Null)) = evalM e >>= return . Bool . isConsList
 -- exprs that get translated into other exprs    (lambda (() . ))
 evalM (Cell (Atom "quote") (Cell e Null)) = return e
-evalM (Cell (Atom "lambda") (Cell args@(Cell _ _) bodies@(Cell _ _))) = do -- (lambda (arg1 arg2) (display (+ arg1 arg2))
+--(Cell (Cell (Atom "lambda") (Cell Null (Cell (Cell (Atom "display") (Cell (String "asdf") Null)) Null))) Null)
+evalM (Cell (Atom "lambda") (Cell args bodies@(Cell _ _))) = do -- (lambda (arg1 arg2) (display (+ arg1 arg2))
   env <- getEnv
   return $ Procedure env (map atomValue $ fromConsList args) (fromConsList bodies)
 evalM (Cell (Atom "lambda") e) = error $ "Invalid lambda: " ++ (show e)
@@ -138,22 +139,21 @@ evalM (Atom k) = lookupEnv k >>= f
   where f (Just xpr) = return xpr
         f Nothing    = error $ "Binding not found: " ++ k
 -- Procedure calling
-evalM (Cell name@(Atom _) args) = evalM name >>= f
+evalM (Cell p args) = evalM p >>= f
   where
-    f proc@(Procedure _ _ _) = evalM $ Cell proc args
+    f (Procedure procenv argNames bodies) = do
+      args' <- mapM evalM $ fromConsList args
+      oldEnv <- getEnv
+      putEnv procenv
+      appendChildEnv $ H.fromList $ zip argNames args'
+      evaluation <- foldM (\_ b -> evalM b) Null bodies -- FIXME: evaluates in reverse order of given
+      popChildEnv
+      putEnv oldEnv
+      return evaluation
+    f a@(Atom _) = do
+      xpr <- evalM a
+      evalM $ Cell xpr args
     f xpr = error $ mconcat ["Not a procedure: ", show xpr]
--- Procedure evaluation
-evalM (Cell (Procedure procenv argNames bodies) e) = do
-  args <- mapM evalM $ fromConsList e
-  oldEnv <- getEnv
-  putEnv procenv
-  appendChildEnv $ H.fromList $ zip argNames args
-  evaluation <- evalBodies bodies
-  popChildEnv
-  putEnv oldEnv
-  return evaluation
-  where
-    evalBodies = foldM (\_ b -> evalM b) Null -- TODO: backwards.....
 -- primitive pass-throughs
 evalM x@(Integer _)       = return x
 evalM x@(String _)        = return x
@@ -162,7 +162,7 @@ evalM x@(Bool _)          = return x
 evalM x@(Procedure _ _ _) = return x
 evalM x@Null              = return x
 evalM x = error $ "Invalid form: " ++ (show x)
-    
+
 {-
     
   State

@@ -75,7 +75,7 @@ parseString = do
   char '"'
   x <- many (noneOf "\"" <|> (char '\\' >> char '\"'))
   char '"'
-  return $ toConsList $ map (\c -> Atom [c]) x
+  return $ String x-- $ toConsList $ map (\c -> Atom [c]) x
       
 {-
               
