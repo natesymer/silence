@@ -8,7 +8,8 @@ module Felony.Expression
   fromConsList,
   toConsList,
   showExpr,
-  createEnv
+  createEnv,
+  unsafeCreateEnv
 )
 where
 
@@ -16,10 +17,14 @@ import Data.HashMap.Strict (HashMap)
 import Control.Monad.ST (RealWorld)
 import Data.Vector.Mutable (MVector)
 import qualified Data.Vector.Mutable as V
+import System.IO.Unsafe
 
 -- FIXME: No reliable way to test equality
 type Environment = MVector RealWorld (HashMap String Expression)
 
+instance Show Environment where
+  show _ = ""
+  
 data Expression = Atom String
                 | String String
                 | Integer Integer
@@ -28,9 +33,13 @@ data Expression = Atom String
                 | Procedure Environment [String] [Expression]
                 | Null
                 | Cell Expression Expression
-                
+                deriving (Show)
+         
 createEnv :: IO Environment
-createEnv = V.new 10         
+createEnv = V.new 0       
+
+unsafeCreateEnv :: Environment
+unsafeCreateEnv = unsafePerformIO $ createEnv
 
 instance Eq Expression where
   (Atom a) == (Atom b) = a == b
@@ -44,9 +53,9 @@ instance Eq Expression where
   _ == _ = False
 
 -- TODO: Rewrite show as as builders
-
-instance Show Expression where
-  show = showExpr
+--
+-- instance Show Expression where
+--   show = showExpr
 
 showExpr :: Expression -> String
 showExpr (Cell (Atom "quote") (Cell e Null)) = "'" ++ show e

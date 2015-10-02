@@ -29,7 +29,7 @@ parseCode = manyTill p eof
           return e
               
 parseExpr :: Parsec String () Expression
-parseExpr = choice [parseQuoted, parseNumber, parseAtom, parseString, parseList]
+parseExpr = choice [parseQuoted, parseNumber, parseBool, parseAtom, parseString, parseList]
 
 {-
 
@@ -52,12 +52,16 @@ whitespace = newline <|> space
 parseAtom :: Parsec String () Expression
 parseAtom = (fmap f . (:)) <$> fstChar <*> rest
   where
-    f "#t" = Bool False
-    f "#f" = Bool False
     f xs = Atom xs
     fstChar = choice [letter, symbol]
     rest = many $ choice [letter, digit, symbol]
-      
+
+parseBool :: Parsec String () Expression
+parseBool = choice [string "#t", string "#f"] >>= f
+  where f "#t" = return $ Bool True
+        f "#f" = return $ Bool False
+        f e = unexpected $ "unexpetected:" ++ e
+
 {-
               
   Strings
@@ -114,14 +118,16 @@ parseQuoted = do
 -}
     
 parseList :: Parsec String () Expression
-parseList = between (char '(') (char ')') (parseProperList <|> parseDottedList)
+parseList = between lp rp (properList <|> dottedList)
   where
-    parseProperList = try $ do
+    lp = char '('
+    rp = char ')'
+    properList = try $ do
       skipMany whitespace
-      lst <- toConsList <$> sepBy parseExpr (skipMany1 whitespace)
+      lst <- sepBy parseExpr (skipMany1 whitespace)
       skipMany whitespace
-      return lst
-    parseDottedList = try $ do
+      return $ toConsList lst
+    dottedList = try $ do
       skipMany whitespace
       h <- parseExpr
       skipMany whitespace
