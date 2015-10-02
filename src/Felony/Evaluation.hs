@@ -20,8 +20,6 @@ import qualified Data.Vector.Mutable as V
 import qualified Data.HashMap.Strict as H
 import Data.HashMap.Strict (HashMap)
 
-import Debug.Trace
-
 evalCode :: String -> IO Expression
 evalCode code = lispEval $ Cell (Procedure unsafeCreateEnv [] $ parseFelony code) Null
 
@@ -77,13 +75,13 @@ lispEval x = do
     evalM (Cell (Atom "eval") (Cell (String code) Null)) = do
       env <- getEnv
       evalM $ Procedure env [] (mconcat $ map fromConsList $ parseFelony code)
-    evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell iffalse _)))) = evalM iffalse 
-    evalM (Cell (Atom "if") (Cell (Bool True) (Cell iftrue _))) = evalM iftrue
-    evalM (Cell (Atom "if") _) = error "Invalid special form: if."
-    evalM (Cell (Atom "not") (Cell e Null)) = evalM e >>= \ev -> case ev of
-      (Bool True)  -> return $ Bool False
-      (Bool False) -> return $ Bool True
-      _            -> error $ "Expression is not a bool."
+    evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell x Null)))) = evalM x
+    evalM (Cell (Atom "if") (Cell (Bool True) (Cell x (Cell _ Null)))) = evalM x
+    evalM (Cell (Atom "if") _) = error "Invalid special form: if"
+    evalM (Cell (Atom "not") (Cell e Null)) = evalM e >>= f
+      where f (Bool True)  = return $ Bool False
+            f (Bool False) = return $ Bool True
+            f _            = error $ "Expression is not a bool."
     evalM (Cell (Atom "cons") (Cell a (Cell b Null))) = Cell <$> (evalM a) <*> (evalM b) -- TODO: Fix cons lists
     evalM (Cell (Atom "cons") _) = error "cons: Incorrect number of arguments."
     evalM (Cell (Atom "car") (Cell a _)) = return a
@@ -128,23 +126,20 @@ lispEval x = do
     -- IO-related
     evalM (Cell (Atom "display") (Cell e Null)) = (evalM e >>= liftIO . print) >> return Null
     -- Environment
-    evalM (Cell (Atom "bind!") (Cell (Atom key) (Cell value Null))) = envInsert key value
-    evalM (Cell (Atom "bind!") (Cell raw@(Cell _ _) (Cell v Null))) = do
-      e <- evalM raw
-      evalM $ Cell (Atom "bind!") (Cell e (Cell v Null)) -- FIXME: avoid extra eval
-    evalM (Cell (Atom "bind!") _) = error $ "Invalid special form: bind!"
+    evalM (Cell (Atom "let!") (Cell (Atom k) (Cell v Null))) = envInsert k v
+    evalM (Cell (Atom "let!") (Cell raw@(Cell _ _) (Cell v Null))) = evalM raw >>= f
+      where f (Atom k) = envInsert k v
+            f _ = error $ mconcat ["Invalid expression (first argument must be an atom): ", show raw]
+    evalM (Cell (Atom "let!") _) = error "Invalid special form: let!"
     -- Environment Lookup
-    evalM (Atom key) = do
-      lkup <- lookupEnv key
-      case lkup of
-        Just xpr -> return xpr
-        Nothing -> error $ "Binding not found: " ++ key
+    evalM (Atom k) = lookupEnv k >>= f
+      where f (Just xpr) = return xpr
+            f Nothing    = error $ "Binding not found: " ++ k
     -- Procedure calling
-    evalM (Cell fname@(Atom a) args) = do
-      proc <- evalM fname
-      case proc of
-        Procedure _ _ _ -> evalM $ Cell proc args
-        _ -> error $ "First argument " ++ a ++ " is not a procedure."
+    evalM (Cell name@(Atom a) args) = evalM name >>= f
+      where
+        f proc@(Procedure _ _ _) = evalM $ Cell proc args
+        f xpr = error $ mconcat ["Not a procedure: ", show xpr]
     -- Procedure evaluation
     evalM (Cell p@(Procedure procenv argNames bodies) e) = do
       args <- mapM evalM $ fromConsList e
