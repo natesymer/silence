@@ -1,3 +1,5 @@
-(bind! beginPure (lambda (*) ((lambda () *))))
-(bind! a "thisisastring")
-(bind! append (lambda (one two) (if (== one '()) two (cons (car one) (append (cdr one) two)))))
+(let! beginPure (lambda (*) ((lambda () *))))
+(let! 'a "thisisastring")
+(display a)
+(let! append (lambda (one two) (if (== one '()) two (cons (car one) (append (cdr one) two)))))
+(display (append '(1 2 3 4) '(5 6 7 8)))

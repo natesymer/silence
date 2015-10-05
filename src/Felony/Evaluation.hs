@@ -79,6 +79,11 @@ evalM (Cell (Atom "eval") (Cell (String code) Null)) = do
   evalM $ Procedure env [] (mconcat $ map fromConsList $ parseFelony code)
 evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell x Null)))) = evalM x
 evalM (Cell (Atom "if") (Cell (Bool True) (Cell x (Cell _ Null)))) = evalM x
+evalM (Cell (Atom "if") (Cell (Bool True) (Cell x Null))) = evalM x
+evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ Null))) = return $ Null 
+evalM (Cell (Atom "if") (Cell x xs)) = do
+  evaled <- evalM x
+  evalM (Cell (Atom "if") (Cell evaled xs))
 evalM (Cell (Atom "if") _) = error "Invalid special form: if"
 evalM (Cell (Atom "not") (Cell e Null)) = evalM e >>= f
   where f (Bool True)  = return $ Bool False
@@ -129,9 +134,9 @@ evalM (Cell (Atom "==") (Cell a (Cell b Null))) = return . Bool $ a == b
 -- IO-related
 evalM (Cell (Atom "display") (Cell e Null)) = (evalM e >>= liftIO . print) >> return Null
 -- Environment
-evalM (Cell (Atom "let!") (Cell (Atom k) (Cell v Null))) = envInsert k v
+evalM (Cell (Atom "let!") (Cell (Atom k) (Cell v Null))) = evalM v >>= envInsert k
 evalM (Cell (Atom "let!") (Cell raw@(Cell _ _) (Cell v Null))) = evalM raw >>= f
-  where f (Atom k) = envInsert k v
+  where f (Atom k) = evalM v >>= envInsert k
         f _ = error $ mconcat ["Invalid expression (first argument must be an atom): ", show raw]
 evalM (Cell (Atom "let!") _) = error "Invalid special form: let!"
 -- Environment Lookup
@@ -141,12 +146,12 @@ evalM (Atom k) = lookupEnv k >>= f
 -- Procedure calling
 evalM (Cell p args) = evalM p >>= f
   where
-    f (Procedure procenv argNames bodies) = do
+    f p@(Procedure procenv argNames bodies) = do
       args' <- mapM evalM $ fromConsList args
       oldEnv <- getEnv
       putEnv procenv
       appendChildEnv $ H.fromList $ zip argNames args'
-      evaluation <- foldM (\_ b -> evalM b) Null bodies -- FIXME: evaluates in reverse order of given
+      evaluation <- foldM (\_ b -> evalM b) Null bodies
       popChildEnv
       putEnv oldEnv
       return evaluation
@@ -186,16 +191,22 @@ envInsert k v = do
     f = H.insert k v
     
 lookupEnv :: String -> StateM (Maybe Expression)
-lookupEnv k = do
-  vec <- getEnv
-  if V.null vec
-    then return Nothing
-    else fmap (H.lookup k) $ V.read vec 0
-  
+lookupEnv k = getEnv >>= f k
+  where
+    f :: String -> Environment -> StateM (Maybe Expression)
+    f k vec
+      | V.null vec = return Nothing
+      | otherwise = do
+        hsh <- V.read vec $ V.length vec - 1
+        f' $ H.lookup k hsh
+        where
+          f' e@(Just _) = return e
+          f' Nothing = f k $ V.slice 0 (V.length vec - 1) vec
+              
 popChildEnv :: StateM ()
 popChildEnv = do
   vec <- getEnv
-  putEnv $ V.slice 0 (V.length vec -1) vec
+  putEnv $ V.slice 0 (V.length vec - 1) vec
   
 appendChildEnv :: HashMap String Expression -> StateM ()
 appendChildEnv child = do

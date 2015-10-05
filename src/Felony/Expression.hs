@@ -52,15 +52,14 @@ instance Eq Expression where
   (Cell a as) == (Cell b bs) = (a == b) && as == bs -- FIXME: Not tail recursive
   _ == _ = False
 
--- TODO: Rewrite show as as builders
---
+-- -- TODO: Rewrite show as as builders
 -- instance Show Expression where
 --   show = showExpr
 
 showExpr :: Expression -> String
 showExpr (Cell (Atom "quote") (Cell e Null)) = "'" ++ show e
 showExpr (Atom x) = x
-showExpr (String x) = "\"" ++ x ++ "\""
+showExpr (String x) = x
 showExpr (Integer x) = show x
 showExpr (Real x) = show x
 showExpr Null = showCell Null
@@ -87,7 +86,7 @@ fromConsList :: Expression -> [Expression]
 fromConsList e = f e []
   where
     f Null accum = accum
-    f (Cell a b) accum = f b (a:accum)
+    f (Cell a b) accum = f b (accum ++ [a])
     f s _ = error $ (show s) ++ " is not a cons list."
 
 isConsList :: Expression -> Bool
