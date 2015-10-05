@@ -57,7 +57,6 @@ atomValue e = error $ "Not an atom: " ++ (show e)
 
 -}
 
--- TODO: Fix environments and toplevel evaluation
 -- TODO TODO TODO: CURRYING!!!!!
 -- TODO: function composition
 -- TODO: Pattern matching:
@@ -137,7 +136,7 @@ evalM (Cell (Atom "display") (Cell e Null)) = (evalM e >>= liftIO . print) >> re
 evalM (Cell (Atom "let!") (Cell (Atom k) (Cell v Null))) = evalM v >>= envInsert k
 evalM (Cell (Atom "let!") (Cell raw@(Cell _ _) (Cell v Null))) = evalM raw >>= f
   where f (Atom k) = evalM v >>= envInsert k
-        f _ = error $ mconcat ["Invalid expression (first argument must be an atom): ", show raw]
+        f _ = error "Invalid special form: let!"
 evalM (Cell (Atom "let!") _) = error "Invalid special form: let!"
 -- Environment Lookup
 evalM (Atom k) = lookupEnv k >>= f
@@ -146,7 +145,7 @@ evalM (Atom k) = lookupEnv k >>= f
 -- Procedure calling
 evalM (Cell p args) = evalM p >>= f
   where
-    f p@(Procedure procenv argNames bodies) = do
+    f (Procedure procenv argNames bodies) = do
       args' <- mapM evalM $ fromConsList args
       oldEnv <- getEnv
       putEnv procenv
@@ -185,33 +184,27 @@ putEnv v = ask >>= liftIO . atomically . flip writeTVar v
 envInsert :: String -> Expression -> StateM Expression
 envInsert k v = do
   vec <- getEnv
-  V.modify vec f 0
+  V.modify vec (H.insert k v) 0
   return v
-  where
-    f = H.insert k v
     
 lookupEnv :: String -> StateM (Maybe Expression)
-lookupEnv k = getEnv >>= f k
+lookupEnv k = getEnv >>= f
   where
-    f :: String -> Environment -> StateM (Maybe Expression)
-    f k vec
+    f :: Environment -> StateM (Maybe Expression)
+    f vec
       | V.null vec = return Nothing
-      | otherwise = do
-        hsh <- V.read vec $ V.length vec - 1
-        f' $ H.lookup k hsh
+      | otherwise = (V.read vec $ V.length vec - 1) >>= (f' . H.lookup k)
         where
           f' e@(Just _) = return e
-          f' Nothing = f k $ V.slice 0 (V.length vec - 1) vec
+          f' Nothing = f $ V.slice 0 (V.length vec - 1) vec
               
 popChildEnv :: StateM ()
-popChildEnv = do
-  vec <- getEnv
-  putEnv $ V.slice 0 (V.length vec - 1) vec
+popChildEnv = getEnv >>= \v -> putEnv $  V.slice 0 (V.length v - 1) v
   
 appendChildEnv :: HashMap String Expression -> StateM ()
 appendChildEnv child = do
   vec <- getEnv
-  bigger <- V.grow vec 1 -- we can do this because 1 is a constant we know to be positive.
+  bigger <- V.unsafeGrow vec 1 -- We know 1 to be positive, skip positivity check
   V.write bigger (V.length vec) child
   putEnv bigger
   
