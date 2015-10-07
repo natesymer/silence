@@ -25,7 +25,8 @@ parseCode = manyTill (between skipWS skips parseExpr) eof
   where skips = try $ skipMany $ choice [void whitespace, void comment]
         skipWS = try $ skipMany $ void whitespace
         skipCmnts = try $ skipMany $ void comment
-              
+    
+-- FIXME: Avoid parsing two atoms on one line next to eachother, outside an expr          
 parseExpr :: Parsec String () Expression
 parseExpr = choice [parseQuoted, parseNumber, parseBool, parseAtom, parseString, parseList]
 
