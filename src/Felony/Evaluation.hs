@@ -66,6 +66,7 @@ atomValue e = error $ "Not an atom: " ++ (show e)
 
 lispEval :: Expression -> IO Expression
 lispEval x = do
+  print x
   v <- createEnv >>= liftIO . newTVarIO
   catch (runReaderT (evalM x) v) onErr
   where
@@ -76,19 +77,19 @@ evalM :: Expression -> StateM Expression
 evalM (Cell (Atom "eval") (Cell (String code) Null)) = do
   env <- getEnv
   evalM $ Procedure env [] (mconcat $ map fromConsList $ parseFelony code)
-evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell x Null)))) = evalM x
 evalM (Cell (Atom "if") (Cell (Bool True) (Cell x (Cell _ Null)))) = evalM x
 evalM (Cell (Atom "if") (Cell (Bool True) (Cell x Null))) = evalM x
-evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ Null))) = return $ Null 
+evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ (Cell x Null)))) = evalM x
+evalM (Cell (Atom "if") (Cell (Bool False) (Cell _ Null))) = return $ Null
 evalM (Cell (Atom "if") (Cell x xs)) = do
   evaled <- evalM x
-  evalM (Cell (Atom "if") (Cell evaled xs))
+  evalM $ Cell (Atom "if") (Cell evaled xs)
 evalM (Cell (Atom "if") _) = error "Invalid special form: if"
 evalM (Cell (Atom "not") (Cell e Null)) = evalM e >>= f
   where f (Bool True)  = return $ Bool False
         f (Bool False) = return $ Bool True
         f _            = error $ "Expression is not a bool."
-evalM (Cell (Atom "cons") (Cell a (Cell b Null))) = Cell <$> (evalM a) <*> (evalM b) -- TODO: Fix cons lists
+evalM (Cell (Atom "cons") (Cell a (Cell b Null))) = Cell <$> (evalM a) <*> (evalM b)
 evalM (Cell (Atom "cons") _) = error "cons: Incorrect number of arguments."
 evalM (Cell (Atom "car") (Cell a _)) = return a
 evalM (Cell (Atom "car") e) = error $ "car: Cannot take the car of: " ++ (show e)
@@ -138,10 +139,6 @@ evalM (Cell (Atom "let!") (Cell raw@(Cell _ _) (Cell v Null))) = evalM raw >>= f
   where f (Atom k) = evalM v >>= envInsert k
         f _ = error "Invalid special form: let!"
 evalM (Cell (Atom "let!") _) = error "Invalid special form: let!"
--- Environment Lookup
-evalM (Atom k) = lookupEnv k >>= f
-  where f (Just xpr) = return xpr
-        f Nothing    = error $ "Binding not found: " ++ k
 -- Procedure calling
 evalM (Cell p args) = evalM p >>= f
   where
@@ -158,6 +155,10 @@ evalM (Cell p args) = evalM p >>= f
       xpr <- evalM a
       evalM $ Cell xpr args
     f xpr = error $ mconcat ["Not a procedure: ", show xpr]
+-- Environment Lookup
+evalM (Atom k) = lookupEnv k >>= f
+  where f (Just xpr) = return xpr
+        f Nothing    = error $ "Binding not found: " ++ k
 -- primitive pass-throughs
 evalM x@(Integer _)       = return x
 evalM x@(String _)        = return x
@@ -165,7 +166,6 @@ evalM x@(Real _)          = return x
 evalM x@(Bool _)          = return x
 evalM x@(Procedure _ _ _) = return x
 evalM x@Null              = return x
-evalM x = error $ "Invalid form: " ++ (show x)
 
 {-
     

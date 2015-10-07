@@ -23,7 +23,7 @@ import System.IO.Unsafe
 type Environment = MVector RealWorld (HashMap String Expression)
 
 instance Show Environment where
-  show _ = ""
+  show _ = "<ENV>"
   
 data Expression = Atom String
                 | String String

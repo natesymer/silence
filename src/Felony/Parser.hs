@@ -7,6 +7,7 @@ where
 import Felony.Expression
 import Data.Char
 import Text.Parsec
+import Control.Monad (void)
 
 {-
 
@@ -15,18 +16,15 @@ import Text.Parsec
 -}
    
 parseFelony :: String -> [Expression]
-parseFelony "" = []
-parseFelony input = f $ parse parseCode "" input
+parseFelony = f . parse parseCode ""
   where f (Left err) = error $ "Invalid syntax: " ++ show err 
         f (Right e) = e
 
 parseCode :: Parsec String () [Expression]
-parseCode = manyTill p eof
-  where p = do
-          skipMany whitespace
-          e <- parseExpr
-          skipMany whitespace
-          return e
+parseCode = manyTill (between skipWS skips parseExpr) eof
+  where skips = try $ skipMany $ choice [void whitespace, void comment]
+        skipWS = try $ skipMany $ void whitespace
+        skipCmnts = try $ skipMany $ void comment
               
 parseExpr :: Parsec String () Expression
 parseExpr = choice [parseQuoted, parseNumber, parseBool, parseAtom, parseString, parseList]
@@ -42,7 +40,12 @@ symbol = oneOf "!$%&|*+-/:<=>?@^_~#"
 
 whitespace :: Parsec String () Char
 whitespace = newline <|> space
-                
+
+comment :: Parsec String () String
+comment = do
+  string ";"
+  manyTill anyToken $ choice [void newline, eof]
+      
 {-
 
   Atoms
@@ -67,32 +70,31 @@ parseBool = choice [string "#t", string "#f"] >>= f
   Strings
 
 -} 
-  
--- TODO: Rewrite
--- Take into account escaping  
+
 parseString :: Parsec String () Expression
 parseString = do
   char '"'
   x <- many (noneOf "\"" <|> (char '\\' >> char '\"'))
   char '"'
-  return $ String x-- $ toConsList $ map (\c -> Atom [c]) x
+  return $ String x
       
 {-
               
   Numbers
 
 -}          
-       
--- TODO: Fix inaccuracies in parsing Reals         
+
 parseNumber :: Parsec String () Expression
 parseNumber = choice [real, dec, notatedDec, hex, binary, octal]
   where
-    toDbl = fromRational . toRational
     real = try $ do
       x <- many digit
       char '.'
       y <- many1 digit
-      return $ Real $ (toDbl $ str2dec x) + ((toDbl $ str2dec y)/((toDbl $ toInteger $ length y)*10.0))
+      
+      let base = length y
+          signfcnd = fromRational . toRational $ str2dec $ x ++ y
+      return $ Real $ signfcnd / (10.0^base)
     dec = try $ (Integer . str2dec) <$> many1 digit
     notatedDec = try $ string "#d" >> ((Integer . str2dec) <$> many1 digit)
     hex = try $ string "#x" >> ((Integer . hex2dec) <$> many1 (digit <|> oneOf "abcdefABCDEF"))
@@ -143,29 +145,20 @@ parseList = between lp rp (properList <|> dottedList)
   
 -}
 
-str2dec :: String -> Integer
-str2dec = baseNToDec 1
-
 bin2dec :: String -> Integer
-bin2dec = baseNToDec 2 . reverse -- Little Endian
+bin2dec = baseNToDec 2 -- Little Endian
 
 oct2dec :: String -> Integer
 oct2dec = baseNToDec 8
+
+str2dec :: String -> Integer
+str2dec = baseNToDec 10
 
 hex2dec :: String -> Integer
 hex2dec = baseNToDec 16
 
 baseNToDec :: Integer -> String -> Integer
-baseNToDec base str = f base 0 str 0
+baseNToDec base str = f ((length str) - 1) str 0
   where
-    f :: Integer -> Integer -> String -> Integer -> Integer
-    f _ _     []     accum = accum
-    f n lspos (x:xs) accum = f n (lspos+1) xs (accum+((n^lspos)*(toInteger $ digitToInt x)))
-           
--- eol :: Parser ()
--- eol = (void newline) <|> eof
---
--- skipComments :: Parser ()
--- skipComments = optional $ do
---   char ';'
---   void $ manyTill anyToken eol
+    f _     []     ttl = ttl
+    f pos (x:xs) ttl = f (pos-1) xs $ ttl + ((base^pos) * (toInteger $ digitToInt x))
