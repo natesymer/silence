@@ -106,18 +106,18 @@ evaluate x@(Cell (Atom a) xs) = do
             Nothing -> error $ "Procedure '" ++ B.unpack a ++ " doesn't exist."
     Nothing -> error $ "Invalid S-Expression: " ++ show x
 evaluate (Cell (Procedure act) xs) = do
-  v <- mapME evaluate xs
+  v <- mapME (getReturnedExpr . evaluate) xs
   case v of
     Just v' -> act v'
     Nothing -> error "Invalid S-Expression."
-evaluate x@(Atom a)        = lookupEnv a >>= fromMaybe Null
-evaluate x@(Integer _)     = return x
-evaluate x@(String _)      = return x
-evaluate x@(Real _)        = return x
-evaluate x@LispTrue        = return x
-evaluate x@LispFalse       = return x
-evaluate x@(Procedure _)   = return x
-evaluate x@Null            = return x
+evaluate x@(Atom a)        = lookupEnv a >>= maybe (error "Can't find atom") returnExpr
+evaluate x@(Integer _)     = returnExpr x
+evaluate x@(String _)      = returnExpr x
+evaluate x@(Real _)        = returnExpr x
+evaluate x@LispTrue        = returnExpr x
+evaluate x@LispFalse       = returnExpr x
+evaluate x@(Procedure _)   = returnExpr x
+evaluate x@Null            = returnExpr x
 
 -- TODO: 'primitive' should be implemented by adding primitive actions to the global environment.
 
@@ -154,7 +154,7 @@ primitive "-"        x                                          = return $ math 
 primitive "*"        x                                          = return $ math "*" x
 primitive "/"        x                                          = return $ math "/" x
 primitive "let!"     (Cell (Atom k) (Cell v Null))              = Just <$> insertEnv k v
-primitive "display"  (Cell a Null)                              = (liftIO $ putStrLn "TODO: print") >> (return $ Just Null)
+primitive "display"  (Cell a Null)                              = (liftIO $ print a) >> (return $ Just Null)
 primitive _          _                                          = return $ Nothing
 
 math :: ByteString -> Expression -> Maybe Expression
