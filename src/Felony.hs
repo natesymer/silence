@@ -1,9 +1,7 @@
 module Felony
 (
-  module Felony.Expression,
-  module Felony.Evaluation
+  module Felony.Lisp
 )
 where
   
-import Felony.Expression
-import Felony.Evaluation
+import Felony.Lisp

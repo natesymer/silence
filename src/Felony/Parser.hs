@@ -4,7 +4,7 @@ module Felony.Parser
 )
 where
   
-import Felony.Expression
+import Felony.Lisp
 import Data.Char
 import Text.Parsec
 import Control.Monad (void)
@@ -86,21 +86,28 @@ parseString = do
 -}          
 
 parseNumber :: Parsec String () Expression
-parseNumber = choice [real, dec, notatedDec, hex, binary, octal]
+parseNumber = real <|> dec <|> hex <|> binary <|> octal
   where
     real = try $ do
+      s <- sign
       x <- many digit
       char '.'
       y <- many1 digit
-      
       let base = length y
           signfcnd = fromRational . toRational $ str2dec $ x ++ y
-      return $ Real $ signfcnd / (10.0^base)
-    dec = try $ (Integer . str2dec) <$> many1 digit
-    notatedDec = try $ string "#d" >> ((Integer . str2dec) <$> many1 digit)
-    hex = try $ string "#x" >> ((Integer . hex2dec) <$> many1 (digit <|> oneOf "abcdefABCDEF"))
-    binary = try $ string "#b" >> ((Integer . bin2dec) <$> many1 digit)
-    octal = try $ string "#o" >> ((Integer . oct2dec) <$> many1 digit)
+      return $ Real $ s * signfcnd / (10.0^base)
+    dec = try $ do
+      s <- sign
+      i <- str2dec <$> many1 digit
+      return $ Integer $ s * i
+    hex = try $ string "#x" *> ((Integer . hex2dec) <$> many1 (digit <|> oneOf "abcdefABCDEF"))
+    binary = try $ string "#b" *> ((Integer . bin2dec) <$> many1 digit)
+    octal = try $ string "#o" *> ((Integer . oct2dec) <$> many1 digit)
+    
+sign :: (Num a) => Parsec String () a
+sign = f <$> (optionMaybe $ char '-')
+  where f Nothing = 1
+        f (Just _) = -1
     
 {-
               
