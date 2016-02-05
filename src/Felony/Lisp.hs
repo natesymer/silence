@@ -88,12 +88,6 @@ showExpr c@(Cell _ _) = "(" <> f c <> ")"
         f (Cell a b) = showExpr a <> " . " <> showExpr b
         f _ = error "Invalid list."
 
--- (car '(1 2))
--- Cell (Atom "car")
---  (Cell
---    (Cell 1 (Cell 2 Null))
---   Null)
-
 -- |Evaluate an expression
 evaluate :: Expression -> LispM ()
 -- S-Expr evaluation
@@ -129,7 +123,7 @@ primitives = H.fromList [
   ("let!", Procedure letBangE),
   ("integer?", Procedure isIntegerE),
   ("real?", Procedure isRealE),
-  ("string?", Procedure isStringE)
+  ("string?", Procedure isStringE),
   ("atom?", Procedure isAtomE),
   ("null?", Procedure isNullE),
   ("list?", Procedure isListE),
@@ -138,6 +132,8 @@ primitives = H.fromList [
   where
     invalidForm :: String -> LispM ()
     invalidForm = error . (++) "invalid special form: "
+    mathE :: ByteString -> (Expression -> LispM ())
+    mathE op = maybe (invalidForm $ B.unpack op) returnExpr . math op
     ifE (Cell LispTrue (Cell expr _)) = evaluate expr
     ifE (Cell LispFalse (Cell _ (Cell expr Null))) = evaluate expr
     ifE _ = invalidForm "if"
@@ -152,7 +148,6 @@ primitives = H.fromList [
     carE _ = invalidForm "car"
     cdrE (Cell _ v) = returnExpr v
     cdrE _ = invalidForm "cdr"
-    mathE op = maybe (invalidForm op) returnExpr . math op
     lambdaE (Cell bindings bodies) = maybe (invalidForm "lambda") returnExpr $ mkLambda bindings bodies
     lambdaE _ = invalidForm "lambda"
     displayE (Cell x xs) = (liftIO $ print x) >> displayE xs
@@ -178,9 +173,13 @@ primitives = H.fromList [
     isListE    (Cell (Cell _ xs) Null) = isListE $ Cell xs Null
     isListE    (Cell Null Null)        = returnExpr LispTrue
     isListE    (Cell _ _)              = returnExpr LispFalse
+    isListE    _                       = invalidForm "list?"
     isPairE    (Cell (Cell _ _) _)     = returnExpr LispTrue
     isPairE    (Cell _ _)              = returnExpr LispFalse
+    isPairE    _                       = invalidForm "pair?"
 
+-- TODO: fix order of ops (it's reversed/backwards)
+-- | generic math primitive.
 math :: ByteString -> Expression -> Maybe Expression
 math "+"  (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Integer $ a + b
 math "+"  (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) + b
