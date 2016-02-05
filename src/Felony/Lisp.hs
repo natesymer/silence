@@ -88,16 +88,26 @@ showExpr c@(Cell _ _) = "(" <> f c <> ")"
         f (Cell a b) = showExpr a <> " . " <> showExpr b
         f _ = error "Invalid list."
 
+-- car: "cdr"
+-- cdr: Cell "quote" (Cell <lst> Null)
+
+-- car: "quote"
+-- cdr: Cell <lst> Null
+
 -- |Evaluate an expression
 evaluate :: Expression -> LispM ()
 -- S-Expr evaluation
+evaluate (Cell (Atom "quote") (Cell v Null)) = returnExpr v
+evaluate (Cell (Atom "quote") _) = error "invalid special form: quote"
 evaluate (Cell x xs) = do
-  x' <- getReturnedExpr $ evaluate x -- TODO: fix list arguments
+  x' <- getReturnedExpr $ evaluate x
   case x' of
     Procedure act -> do
       xs' <- mapME (getReturnedExpr . evaluate) xs
-      act $ fromMaybe Null xs'
-    _ -> error "Invalid S-Expression"
+      case xs' of
+        Just xs'' -> act xs''
+        Nothing -> error "Invalid S-Expression: arguments not a list."
+    _ -> error "Invalid S-Expression: car not a procedure."
 -- environment lookup
 evaluate (Atom a) = lookupEnv a >>= maybe (error $ "Can't find " ++ B.unpack a) returnExpr
 -- literal passthroughs
@@ -107,8 +117,6 @@ evaluate x = returnExpr x
 primitives :: EnvFrame
 primitives = H.fromList [
   ("if",Procedure ifE),
-  ("quote",Procedure quoteE),
-  ("'",Procedure quoteE),
   ("not",Procedure notE),
   ("cons",Procedure consE),
   ("car",Procedure carE),
@@ -137,16 +145,14 @@ primitives = H.fromList [
     ifE (Cell LispTrue (Cell expr _)) = evaluate expr
     ifE (Cell LispFalse (Cell _ (Cell expr Null))) = evaluate expr
     ifE _ = invalidForm "if"
-    quoteE (Cell x Null) = returnExpr x
-    quoteE _ = invalidForm "quote"
     notE (Cell LispFalse Null) = returnExpr LispTrue
     notE (Cell LispTrue Null) = returnExpr LispFalse
     notE _ = invalidForm "not"
     consE (Cell a (Cell b Null)) = returnExpr $ Cell a b
     consE _ = invalidForm "cons"
-    carE (Cell v _) = returnExpr v
+    carE (Cell (Cell v _) Null) = returnExpr v
     carE _ = invalidForm "car"
-    cdrE (Cell _ v) = returnExpr v
+    cdrE (Cell (Cell _ v) Null) = returnExpr v
     cdrE _ = invalidForm "cdr"
     lambdaE (Cell bindings bodies) = maybe (invalidForm "lambda") returnExpr $ mkLambda bindings bodies
     lambdaE _ = invalidForm "lambda"
