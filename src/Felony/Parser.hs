@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Felony.Parser
 (
   parseFelony
@@ -8,6 +9,8 @@ import Felony.Lisp
 import Data.Char
 import Text.Parsec
 import Control.Monad (void)
+
+import qualified Data.ByteString.Char8 as B
 
 {-
 
@@ -56,14 +59,14 @@ comment = do
 parseAtom :: Parsec String () Expression
 parseAtom = (fmap f . (:)) <$> fstChar <*> rest
   where
-    f xs = Atom xs
+    f = Atom . B.pack
     fstChar = choice [letter, symbol]
     rest = many $ choice [letter, digit, symbol]
 
 parseBool :: Parsec String () Expression
 parseBool = choice [string "#t", string "#f"] >>= f
-  where f "#t" = return $ Bool True
-        f "#f" = return $ Bool False
+  where f "#t" = return $ LispTrue
+        f "#f" = return $ LispFalse
         f e = unexpected $ "unexpetected:" ++ e
 
 {-
@@ -77,7 +80,7 @@ parseString = do
   char '"'
   x <- many (noneOf "\"" <|> (char '\\' >> char '\"'))
   char '"'
-  return $ String x
+  return $ String $ B.pack x
       
 {-
               

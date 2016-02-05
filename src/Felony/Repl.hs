@@ -1,11 +1,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Felony.Repl where
-import           Felony
--- import           Felony.Expression
+import           Felony.Lisp
+import           Felony.Parser
 import           System.IO
-import           Control.Exception.Base
-import           GHC.IO.Exception
+import           Control.Exception.Base hiding (evaluate)
+import           GHC.IO.Exception 
 
 catcher :: String -> IO Expression
 catcher errmsg = putStrLn errmsg >> return Null
@@ -23,3 +23,10 @@ repl outp inp prompt = do
       
 terminalRepl :: String -> IO ()
 terminalRepl prompt = repl stdout stdin prompt
+
+evalCode :: String -> IO Expression
+evalCode code = thrd <$> runLispM e createEnv
+  where f [x] = x
+        f x = toConsList x
+        e = evaluate $ f $ parseFelony code
+        thrd (_,_,v) = v

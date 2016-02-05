@@ -1,16 +1,17 @@
-{-# LANGUAGE OverloadedStrings, TupleSections, Rank2Types, GADTs #-}
+{-# LANGUAGE OverloadedStrings, TupleSections, GADTs, Rank2Types #-}
 
 module Felony.Lisp
 (
-  LispT(..),
-  Expression,
-  setEnv,
-  getEnv
+  LispM(..),
+  Expression(..),
+  Environment,
+  createEnv,
+  evaluate,
+  toConsList,
+  mkLambda
 ) where
   
 import Control.Monad
-import Control.Monad.Identity
-import Control.Monad.Trans.Class
 import Control.Monad.IO.Class
   
 import Data.Monoid
@@ -22,41 +23,38 @@ import qualified Data.ByteString.Char8 as B
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
   
-newtype LispT m a = LispT {
-  runLispT :: Environment -> m (a,Environment,Expression)
+newtype LispM a = LispM {
+  runLispM :: Environment -> IO (a,Environment,Expression)
 }
 
-instance (Functor m) => Functor (LispT m) where
-  fmap f m = LispT $ \env -> fmap f' $ runLispT m env
+instance Functor LispM where
+  fmap f m = LispM $ \env -> fmap f' $ runLispM m env
     where f' (a,env',expr') = (f a,env',expr')
   
-instance (Monad m) => Applicative (LispT m) where
-  pure a = LispT $ \env -> return (a,env,Null)
+instance Applicative LispM where
+  pure a = LispM $ \env -> return (a,env,Null)
   (<*>) = ap
 
-instance (Monad m) => Monad (LispT m) where
-  fail msg = LispT $ \_ -> fail msg
-  m >>= k = LispT $ \env -> do
+instance Monad LispM where
+  fail msg = LispM $ \_ -> fail msg
+  m >>= k = LispM $ \env -> do
     -- TODO: evaluate this
-    (a,env',_) <- runLispT m env
-    runLispT (k a) env'
+    (a,env',_) <- runLispM m env
+    runLispM (k a) env'
 
-instance MonadTrans LispT where
-  lift m = LispT $ \env -> m >>= return . (,env,Null)
+instance MonadIO LispM where
+  liftIO io = LispM $ \env -> fmap (,env,Null) io
 
-instance (MonadIO m) => MonadIO (LispT m) where
-  liftIO = lift . liftIO
-  
 data Expression = Atom ByteString
                 | String ByteString
                 | Integer Integer
                 | Real Double
                 | LispTrue
                 | LispFalse
-                | Procedure ((Monad m) => Expression -> LispT m ())
+                | Procedure (Expression -> LispM ())
                 | Null
-                | Cell Expression Expression
-                
+                | Cell Expression Expression 
+
 instance Show Expression where
   show = B.unpack . showExpr
 
@@ -71,8 +69,8 @@ instance Eq Expression where
   LispFalse == LispFalse = True
   Null == Null = True
   (Cell a as) == (Cell b bs) = a == b && as == bs
-  _ == _ = False 
-  
+  _ == _ = False
+
 showExpr :: Expression -> ByteString
 showExpr (Cell (Atom "quote") (Cell e Null)) = "'" <> showExpr e
 showExpr (Atom x) = x
@@ -90,104 +88,127 @@ showExpr c@(Cell _ _) = "(" <> f c <> ")"
         f (Cell a b) = showExpr a <> " . " <> showExpr b
         f _ = error "Invalid list."
 
+-- (car '(1 2))
+-- Cell (Atom "car")
+--  (Cell
+--    (Cell 1 (Cell 2 Null))
+--   Null)
+
 -- |Evaluate an expression
-evaluate :: (Monad m) => Expression -> LispT m ()
-evaluate x@(Cell (Atom a) xs) = do
-  case fromConsList xs of
-    Just xs' -> do
-      args <- mapME (getReturnedExpr . evaluate) xs
-      expr <- primitive a args
-      case expr of
-        Just expr' -> returnExpr expr'
-        Nothing -> do
-          v <- lookupEnv a
-          case v of
-            Just (Procedure act) -> act args
-            Nothing -> error $ "Procedure '" ++ B.unpack a ++ " doesn't exist."
-    Nothing -> error $ "Invalid S-Expression: " ++ show x
-evaluate (Cell (Procedure act) xs) = do
-  v <- mapME (getReturnedExpr . evaluate) xs
-  case v of
-    Just v' -> act v'
-    Nothing -> error "Invalid S-Expression."
-evaluate x@(Atom a)        = lookupEnv a >>= maybe (error "Can't find atom") returnExpr
-evaluate x@(Integer _)     = returnExpr x
-evaluate x@(String _)      = returnExpr x
-evaluate x@(Real _)        = returnExpr x
-evaluate x@LispTrue        = returnExpr x
-evaluate x@LispFalse       = returnExpr x
-evaluate x@(Procedure _)   = returnExpr x
-evaluate x@Null            = returnExpr x
+evaluate :: Expression -> LispM ()
+-- S-Expr evaluation
+evaluate (Cell x xs) = do
+  x' <- getReturnedExpr $ evaluate x -- TODO: fix list arguments
+  case x' of
+    Procedure act -> do
+      xs' <- mapME (getReturnedExpr . evaluate) xs
+      act $ fromMaybe Null xs'
+    _ -> error "Invalid S-Expression"
+-- environment lookup
+evaluate (Atom a) = lookupEnv a >>= maybe (error $ "Can't find " ++ B.unpack a) returnExpr
+-- literal passthroughs
+evaluate x = returnExpr x
 
--- TODO: 'primitive' should be implemented by adding primitive actions to the global environment.
-
--- |logic such as @if@, @lambda@, among others. Does not evaluate
--- the expression on which it operates & does not cause side effects.
-primitive :: (MonadIO m) => ByteString -> Expression -> LispT m (Maybe Expression)
-primitive "if"       (Cell LispTrue (Cell expr _))              = return $ Just expr
-primitive "if"       (Cell LispFalse (Cell _ (Cell expr Null))) = return $ Just expr
-primitive "not"      (Cell LispFalse Null)                      = return $ Just LispTrue
-primitive "not"      (Cell LispTrue Null)                       = return $ Just LispFalse
-primitive "cons"     (Cell a (Cell b Null))                     = return $ Just $ Cell a b
-primitive "car"      (Cell v _)                                 = return $ Just v
-primitive "cdr"      (Cell _ v)                                 = return $ Just v
-primitive "integer?" (Cell (Integer _) _)                       = return $ Just LispTrue
-primitive "integer?" (Cell _ _)                                 = return $ Just LispFalse
-primitive "real?"    (Cell (Real _) _)                          = return $ Just LispTrue
-primitive "real?"    (Cell _ _)                                 = return $ Just LispFalse
-primitive "string?"  (Cell (String _) _)                        = return $ Just LispTrue
-primitive "string?"  (Cell _ _)                                 = return $ Just LispFalse
-primitive "atom?"    (Cell (Atom _) _)                          = return $ Just LispTrue
-primitive "atom?"    (Cell _ _)                                 = return $ Just LispFalse
-primitive "null?"    (Cell Null _)                              = return $ Just LispTrue
-primitive "null?"    (Cell _ _)                                 = return $ Just LispFalse
-primitive "list?"    (Cell Null _)                              = return $ Just LispTrue
-primitive "list?"    (Cell (Cell _ a) _)                        = primitive "list?" a
-primitive "list?"    (Cell _ _)                                 = return $ Just LispFalse
-primitive "pair?"    (Cell (Cell _ _) _)                        = return $ Just LispTrue
-primitive "pair?"    (Cell _ _)                                 = return $ Just LispFalse
-primitive "quote"    (Cell v _)                                 = return $ Just v
-primitive "lambda"   (Cell bindings bodies)                     = return $ mkLambda bindings bodies
-primitive "=="       (Cell a (Cell b Null))                     = return $ Just $ if a == b then LispTrue else LispFalse
-primitive "+"        x                                          = return $ math "+" x
-primitive "-"        x                                          = return $ math "-" x
-primitive "*"        x                                          = return $ math "*" x
-primitive "/"        x                                          = return $ math "/" x
-primitive "let!"     (Cell (Atom k) (Cell v Null))              = Just <$> insertEnv k v
-primitive "display"  (Cell a Null)                              = (liftIO $ print a) >> (return $ Just Null)
-primitive _          _                                          = return $ Nothing
+-- |Primitive procedures.
+primitives :: EnvFrame
+primitives = H.fromList [
+  ("if",Procedure ifE),
+  ("quote",Procedure quoteE),
+  ("'",Procedure quoteE),
+  ("not",Procedure notE),
+  ("cons",Procedure consE),
+  ("car",Procedure carE),
+  ("cdr",Procedure cdrE),
+  ("==",Procedure $ mathE "=="),
+  ("+",Procedure $ mathE "+"),
+  ("-", Procedure $ mathE "-"),
+  ("*", Procedure  $ mathE "*"),
+  ("/", Procedure  $ mathE "/"),
+  ("lambda", Procedure lambdaE),
+  ("display", Procedure displayE),
+  ("let!", Procedure letBangE),
+  ("integer?", Procedure isIntegerE),
+  ("real?", Procedure isRealE),
+  ("string?", Procedure isStringE)
+  ("atom?", Procedure isAtomE),
+  ("null?", Procedure isNullE),
+  ("list?", Procedure isListE),
+  ("pair?", Procedure isPairE)
+  ]
+  where
+    invalidForm :: String -> LispM ()
+    invalidForm = error . (++) "invalid special form: "
+    ifE (Cell LispTrue (Cell expr _)) = evaluate expr
+    ifE (Cell LispFalse (Cell _ (Cell expr Null))) = evaluate expr
+    ifE _ = invalidForm "if"
+    quoteE (Cell x Null) = returnExpr x
+    quoteE _ = invalidForm "quote"
+    notE (Cell LispFalse Null) = returnExpr LispTrue
+    notE (Cell LispTrue Null) = returnExpr LispFalse
+    notE _ = invalidForm "not"
+    consE (Cell a (Cell b Null)) = returnExpr $ Cell a b
+    consE _ = invalidForm "cons"
+    carE (Cell v _) = returnExpr v
+    carE _ = invalidForm "car"
+    cdrE (Cell _ v) = returnExpr v
+    cdrE _ = invalidForm "cdr"
+    mathE op = maybe (invalidForm op) returnExpr . math op
+    lambdaE (Cell bindings bodies) = maybe (invalidForm "lambda") returnExpr $ mkLambda bindings bodies
+    lambdaE _ = invalidForm "lambda"
+    displayE (Cell x xs) = (liftIO $ print x) >> displayE xs
+    displayE Null = (liftIO $ print Null) >> returnExpr Null
+    displayE _ = invalidForm "display"
+    letBangE (Cell (Atom k) (Cell v Null)) = insertEnv k v
+    letBangE _ = invalidForm "let!"
+    isIntegerE (Cell (Integer _) Null) = returnExpr LispTrue
+    isIntegerE (Cell _ Null)           = returnExpr LispFalse
+    isIntegerE _                       = invalidForm "integer?"
+    isRealE    (Cell (Real _) Null)    = returnExpr LispTrue
+    isRealE    (Cell _ Null)           = returnExpr LispFalse
+    isRealE    _                       = invalidForm "real?"
+    isStringE  (Cell (String _) Null)  = returnExpr LispTrue
+    isStringE  (Cell _ Null)           = returnExpr LispFalse
+    isStringE  _                       = invalidForm "string?"
+    isAtomE    (Cell (Atom _) Null)    = returnExpr LispTrue
+    isAtomE    (Cell _ Null)           = returnExpr LispFalse
+    isAtomE    _                       = invalidForm "atom?"
+    isNullE    (Cell Null Null)        = returnExpr LispTrue
+    isNullE    (Cell _ Null)           = returnExpr LispFalse
+    isNullE    _                       = invalidForm "null?"
+    isListE    (Cell (Cell _ xs) Null) = isListE $ Cell xs Null
+    isListE    (Cell Null Null)        = returnExpr LispTrue
+    isListE    (Cell _ _)              = returnExpr LispFalse
+    isPairE    (Cell (Cell _ _) _)     = returnExpr LispTrue
+    isPairE    (Cell _ _)              = returnExpr LispFalse
 
 math :: ByteString -> Expression -> Maybe Expression
-math "+" (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Integer $ a + b
-math "+" (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) + b
-math "+" (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a + (fromInteger b)
-math "+" (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a + b
-math "-" (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Integer $ a - b
-math "-" (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) - b
-math "-" (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a - (fromInteger b)
-math "-" (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a - b
-math "*" (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Integer $ a * b
-math "*" (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) * b
-math "*" (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a * (fromInteger b)
-math "*" (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a * b
-math "/" (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Real $ (fromInteger a) / (fromInteger b)
-math "/" (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) / b
-math "/" (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a / (fromInteger b)
-math "/" (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a / b
-math op  (Cell a (Cell b xs))                       = math op x >>= math op where x = (Cell a (Cell b Null))
-math _   _                                          = Nothing
+math "+"  (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Integer $ a + b
+math "+"  (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) + b
+math "+"  (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a + (fromInteger b)
+math "+"  (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a + b
+math "-"  (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Integer $ a - b
+math "-"  (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) - b
+math "-"  (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a - (fromInteger b)
+math "-"  (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a - b
+math "*"  (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Integer $ a * b
+math "*"  (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) * b
+math "*"  (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a * (fromInteger b)
+math "*"  (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a * b
+math "/"  (Cell (Integer a) (Cell (Integer b) Null)) = Just $ Real $ (fromInteger a) / (fromInteger b)
+math "/"  (Cell (Integer a) (Cell (Real b) Null))    = Just $ Real $ (fromInteger a) / b
+math "/"  (Cell (Real a) (Cell (Integer b) Null))    = Just $ Real $ a / (fromInteger b)
+math "/"  (Cell (Real a) (Cell (Real b) Null))       = Just $ Real $ a / b
+math "==" (Cell a (Cell b Null))                     = Just $ if a == b then LispTrue else LispFalse
+math op   (Cell a (Cell b xs))                       = math op x >>= math op . flip Cell xs where x = (Cell a (Cell b Null))
+math _    _                                          = Nothing
 
-returnExpr :: (Monad m) => Expression -> LispT m ()
-returnExpr e = LispT $ \env -> return ((),env,e)
+returnExpr :: Expression -> LispM ()
+returnExpr e = LispM $ \env -> return ((),env,e)
 
-getReturnedExpr :: (Monad m) => LispT m () -> LispT m Expression
-getReturnedExpr (LispT f) = LispT $ \env -> (\(_,_,e) -> (e,env,Null)) <$> f env
+getReturnedExpr :: LispM () -> LispM Expression
+getReturnedExpr (LispM f) = LispM $ \env -> (\(_,_,e) -> (e,env,Null)) <$> f env
 
 -- Lists
-
--- |Map a function over an expression, failing if it's not a list.
-mapE :: (Expression -> Expression) -> Expression -> Maybe Expression
-mapE f = runIdentity . mapME (return . f)
 
 -- |Map a monadic function over an 'Expression'. Returns 'Nothing'
 -- if the expression turns out to not be a cons list.
@@ -201,7 +222,7 @@ fromConsList = f $ Just []
   where
     f acc Null = acc
     f acc (Cell x xs) = f (fmap ((:) x) acc) xs 
-    f acc _ = Nothing
+    f _ _ = Nothing
     
 toConsList :: [Expression] -> Expression
 toConsList = foldr Cell Null
@@ -216,21 +237,18 @@ mkLambda bindings bodies = do
   bodies' <- fromConsList bodies
   if null bodies'
     then Nothing
-    else Just $ Procedure $ proc bindings' bodies'
-      
-  where
-    fromAtoms acc Null = acc
-    fromAtoms acc (Cell (Atom a) xs) = fromAtoms (fmap ((:) a) acc) xs
-    fromAtoms acc _ = Nothing
-    proc :: (Monad m) => [ByteString] -> [Expression] -> Expression -> LispT m ()
-    proc bindings bodies expr = do
+    else Just $ Procedure $ \expr -> do
       case fromConsList expr of
         Nothing -> error $ "Invalid arguments (not a cons list)." -- TODO: print @expr@
         Just args -> do
-          pushEnvFrame (H.fromList $ zip bindings args)
-          ret <- getReturnedExpr $ last $ map evaluate bodies
+          pushEnvFrame $ H.fromList $ zip bindings' args
+          ret <- getReturnedExpr $ last $ map evaluate bodies'
           popEnvFrame
           returnExpr ret
+  where
+    fromAtoms acc Null = acc
+    fromAtoms acc (Cell (Atom a) xs) = fromAtoms (fmap ((:) a) acc) xs
+    fromAtoms _ _ = Nothing
 
 -- Environment
 
@@ -240,27 +258,24 @@ data Environment = Frame Environment EnvFrame | Empty
 createEnv :: Environment
 createEnv = Empty
 
-getEnv :: (Monad m) => LispT m Environment
-getEnv = LispT $ \env -> return (env,env,Null)
-
 -- |Pop a "stack frame".
-popEnvFrame :: (Monad m) => LispT m ()
-popEnvFrame = LispT f
+popEnvFrame :: LispM ()
+popEnvFrame = LispM f
   where f Empty = error "Cannot pop empty stack."
         f (Frame xs _) = return ((),xs,Null)
 
 -- |Push a "stack frame"
-pushEnvFrame :: (Monad m) => EnvFrame -> LispT m ()
-pushEnvFrame child = LispT $ \env -> return ((),Frame env child,Null)
+pushEnvFrame :: EnvFrame -> LispM ()
+pushEnvFrame child = LispM $ \env -> return ((),Frame env child,Null)
 
 -- |Insert a value into the environment.
-insertEnv :: (Monad m) => ByteString -> Expression -> LispT m Expression
-insertEnv k v = LispT f
+insertEnv :: ByteString -> Expression -> LispM ()
+insertEnv k v = LispM f
   where f Empty = error "No stack frame!"
-        f (Frame xs x) = return (v,Frame xs (H.insert k v x),Null)
+        f (Frame xs x) = return ((),Frame xs (H.insert k v x),v)
 
 -- |Lookup a value in the environment.
-lookupEnv :: (MonadIO m) => ByteString -> LispT m (Maybe Expression)
-lookupEnv k = LispT $ \env -> return (f env,env,Null)
+lookupEnv :: ByteString -> LispM (Maybe Expression)
+lookupEnv k = LispM $ \env -> return (f $ Frame env primitives ,env,Null)
   where f Empty = Nothing
         f (Frame xs x) = maybe (f xs) Just (H.lookup k x)
