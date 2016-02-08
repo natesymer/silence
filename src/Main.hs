@@ -3,12 +3,13 @@
 import Felony.Lisp
 import Felony.Repl
 import Felony.Parser
-import Data.Maybe
 import System.Environment
 import Control.Monad
 
 main :: IO ()
 main = getArgs >>= procArgs
+
+-- TODO: Optparse-Applicative
 
 procArgs :: [String] -> IO ()
 procArgs [] = procArgs ["-r"]
@@ -25,5 +26,5 @@ printHelp = do
   
 evalProgram :: String -> IO Expression
 evalProgram code = thrd <$> runLispM e createEnv
-  where e = evaluate . fromMaybe Null . mkLambda Null . toConsList . parseFelony $ code
+  where e = evaluate $ Cell Null $ Cell (toConsList $ parseFelony code) Null
         thrd (_,_,v) = v
