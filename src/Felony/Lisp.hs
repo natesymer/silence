@@ -21,6 +21,11 @@ import qualified Data.ByteString.Char8 as B
 
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
+
+-- TODO:
+-- 1. fix let! binding issue 
+--    ((lambda () (let! a 5) (display a)))
+--    gives a "felony: cannot find a"
   
 newtype LispM a = LispM {
   runLispM :: Environment -> IO (a,Environment,Expression)
@@ -143,10 +148,9 @@ primitives = H.fromList [
     isNullE [Null] = returnExpr LispTrue
     isNullE [_]    = returnExpr LispFalse
     isNullE _      = invalidForm "null?"
-    isListE [Cell _ xs] = isListE $ Cell xs Null
+    isListE [Cell _ xs] = isListE [xs]
     isListE [Null]      = returnExpr LispTrue
-    isListE [Cell _ _]  = returnExpr LispFalse -- TODO: verify this
-    isListE [_]         = invalidForm "list?"
+    isListE _           = invalidForm "list?"
     isPairE [Cell _ (Cell _ _)] = returnExpr LispFalse -- TODO: verify this
     isPairE [Cell _ _]          = returnExpr LispTrue
     isPairE _                   = invalidForm "pair?"
@@ -227,9 +231,9 @@ toConsList = foldr Cell Null
 mkLambda :: [ByteString] -> [Expression] -> Expression
 mkLambda bindings bodies = Procedure $ \args -> do
   pushEnvFrame $ H.fromList $ zip bindings args
-  ret <- getReturnedExpr $ last $ map evaluate bodies
+  rets <- mapM (getReturnedExpr . evaluate) bodies
   popEnvFrame
-  returnExpr ret
+  returnExpr $ last rets
 
 -- Environment
 
