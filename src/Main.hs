@@ -25,6 +25,4 @@ printHelp = do
   putStrLn "This is the help message... Kinda sucks, right?"
   
 evalProgram :: String -> IO Expression
-evalProgram code = thrd <$> runLispM e createEnv
-  where e = evaluate $ Cell Null $ Cell (toConsList $ parseFelony code) Null
-        thrd (_,_,v) = v
+evalProgram = evalExpressions . parseFelony

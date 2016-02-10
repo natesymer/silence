@@ -5,13 +5,12 @@ module Felony.Lisp
   LispM(..),
   Expression(..),
   Environment,
-  createEnv,
+  evalExpressions,
   evaluate,
   toConsList,
   mkLambda
 ) where
-  
-import Control.Monad
+
 import Control.Monad.IO.Class
   
 import Data.Monoid
@@ -21,15 +20,16 @@ import qualified Data.ByteString.Char8 as B
 
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
-
--- TODO:
--- 1. fix let! binding issue 
---    ((lambda () (let! a 5) (display a)))
---    gives a "felony: cannot find a"
   
 newtype LispM a = LispM {
   runLispM :: Environment -> IO (a,Environment,Expression)
 }
+
+evalExpressions :: [Expression] -> IO Expression
+evalExpressions e = thrd <$> runLispM (evaluate e') Empty
+  where
+    e' = Cell (mkLambda [] e) Null -- Wrap with lambda evaluation
+    thrd (_,_,v) = v
 
 instance Functor LispM where
   fmap f m = LispM $ \env -> fmap f' $ runLispM m env
@@ -37,12 +37,14 @@ instance Functor LispM where
   
 instance Applicative LispM where
   pure a = LispM $ \env -> return (a,env,Null)
-  (<*>) = ap
+  m1 <*> m2 = LispM $ \env -> do
+    (f,env',_) <- runLispM m1 env
+    (a,env'',expr) <- runLispM m2 env'
+    return (f a, env'', expr)
 
 instance Monad LispM where
   fail msg = LispM $ \_ -> fail msg
   m >>= k = LispM $ \env -> do
-    -- TODO: evaluate this
     (a,env',_) <- runLispM m env
     runLispM (k a) env'
 
@@ -91,6 +93,9 @@ showExpr c@(Cell _ _) = "(" <> f c <> ")"
         f (Cell a b@(Cell _ _)) = showExpr a <> " " <> f b
         f (Cell a b) = showExpr a <> " . " <> showExpr b
         f _ = error "invalid cons list."
+      
+invalidForm :: String -> LispM ()
+invalidForm = lispError . (++) "invalid special form: "
         
 -- |Primitive procedures.
 primitives :: EnvFrame
@@ -116,8 +121,6 @@ primitives = H.fromList [
   ("pair?", Procedure isPairE)
   ]
   where
-    invalidForm :: String -> LispM ()
-    invalidForm = lispError . (++) "invalid special form: "
     ifE (LispTrue:expr:_)  = evaluate expr
     ifE [LispFalse,_,expr] = evaluate expr
     ifE _                  = invalidForm "if"
@@ -184,34 +187,34 @@ lispError = error
 -- |Evaluate an expression
 evaluate :: Expression -> LispM ()
 evaluate (Cell (Atom "quote") (Cell v Null)) = returnExpr v
-evaluate (Cell (Atom "quote") _) = lispError "invalid special form: quote"
+evaluate (Cell (Atom "quote") _) = invalidForm "quote"
 evaluate (Cell (Atom "lambda") (Cell bindings bodies)) = do
-  case (fromConsList bindings >>= fromAtoms (Just []), fromConsList bodies) of
+  case (fromConsList bindings >>= fromAtoms, fromConsList bodies) of
     (Just bindings', Just bodies') -> returnExpr $ mkLambda bindings' bodies'
-    _ -> lispError "invalid special form: lambda"
+    _ -> invalidForm "lambda"
   where
-    fromAtoms acc [] = acc
-    fromAtoms acc ((Atom a):xs) = fromAtoms (fmap ((:) a) acc) xs -- TODO: will this screw up order?
-    fromAtoms _ _ = Nothing
-evaluate (Cell (Atom "lambda") _) = lispError "invalid special form: lambda"
+    fromAtoms = foldr f (Just [])
+      where f (Atom a) b = ((:) a) <$> b
+            f _        _ = Nothing
+evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
 evaluate (Cell x xs) = (getReturnedExpr $ evaluate x) >>= f
   where f (Procedure act) = do
           case fromConsList xs of
             Nothing -> error "invalid s-expression: cdr not a cons list."
-            Just xs' -> do
-              xs'' <- mapM (getReturnedExpr . evaluate) xs'
-              act xs''
+            Just xs' -> mapM (getReturnedExpr . evaluate) xs' >>= act
         f _ = error "invalid s-expression: car not a procedure."
-evaluate (Atom a) = lookupEnv a >>= maybe (lispError $ "cannot find " ++ B.unpack a) returnExpr
+evaluate (Atom a) = do
+  LispM $ \env -> f env $ Frame env primitives
+  where
+    f env (Frame xs x) = maybe (f env xs) (return . ((),env,)) $! H.lookup a x
+    f _ Empty = error $ "cannot find " ++ B.unpack a
 evaluate x = returnExpr x
 
 returnExpr :: Expression -> LispM ()
 returnExpr e = LispM $ \env -> return ((),env,e)
 
 getReturnedExpr :: LispM () -> LispM Expression
-getReturnedExpr (LispM f) = LispM $ \env -> (\(_,_,e) -> (e,env,Null)) <$> f env
-
--- Lists
+getReturnedExpr (LispM f) = LispM $ \env -> (\(_,env',e) -> (e,env',Null)) <$> f env
 
 -- |Transform a cons list into a haskell list.
 fromConsList :: Expression -> Maybe [Expression]
@@ -219,13 +222,10 @@ fromConsList = f $ Just []
   where f acc Null = acc
         f acc (Cell x xs) = f (fmap (flip (++) [x]) acc) xs
         f _ _ = Nothing
-    
--- TODO: double check this.
+
 -- |Transform a Haskell list into a cons list.
 toConsList :: [Expression] -> Expression
 toConsList = foldr Cell Null
-
--- Procedures
 
 -- |Construct a lambda from bindings and bodies.
 mkLambda :: [ByteString] -> [Expression] -> Expression
@@ -235,13 +235,8 @@ mkLambda bindings bodies = Procedure $ \args -> do
   popEnvFrame
   returnExpr $ last rets
 
--- Environment
-
 type EnvFrame = HashMap ByteString Expression
-data Environment = Frame Environment EnvFrame | Empty
-
-createEnv :: Environment
-createEnv = Empty
+data Environment = Frame Environment EnvFrame | Empty deriving (Show)
 
 -- |Pop a "stack frame".
 popEnvFrame :: LispM ()
@@ -258,9 +253,3 @@ insertEnv :: ByteString -> Expression -> LispM ()
 insertEnv k v = LispM f
   where f Empty = error "No stack frame!"
         f (Frame xs x) = return ((),Frame xs (H.insert k v x),v)
-
--- |Lookup a value in the environment.
-lookupEnv :: ByteString -> LispM (Maybe Expression)
-lookupEnv k = LispM $ \env -> return (f $ Frame env primitives ,env,Null)
-  where f Empty = Nothing
-        f (Frame xs x) = maybe (f xs) Just (H.lookup k x)

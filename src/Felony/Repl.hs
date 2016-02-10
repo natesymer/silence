@@ -25,8 +25,4 @@ terminalRepl :: String -> IO ()
 terminalRepl prompt = repl stdout stdin prompt
 
 evalCode :: String -> IO Expression
-evalCode code = thrd <$> runLispM e createEnv
-  where f [x] = x
-        f x = toConsList x
-        e = evaluate $ f $ parseFelony code
-        thrd (_,_,v) = v
+evalCode = evalExpressions . parseFelony
