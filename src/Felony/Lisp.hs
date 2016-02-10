@@ -100,16 +100,15 @@ primitives = H.fromList [
   ("-", Procedure subE),
   ("*", Procedure mulE),
   ("/", Procedure divE),
-  ("lambda", Procedure lambdaE),
   ("display", Procedure displayE),
   ("let!", Procedure letBangE),
-  ("integer?", Procedure isIntegerE)-- ,
-  -- ("real?", Procedure isRealE),
-  -- ("string?", Procedure isStringE),
-  -- ("atom?", Procedure isAtomE),
-  -- ("null?", Procedure isNullE),
-  -- ("list?", Procedure isListE),
-  -- ("pair?", Procedure isPairE)
+  ("integer?", Procedure isIntegerE),
+  ("real?", Procedure isRealE),
+  ("string?", Procedure isStringE),
+  ("atom?", Procedure isAtomE),
+  ("null?", Procedure isNullE),
+  ("list?", Procedure isListE),
+  ("pair?", Procedure isPairE)
   ]
   where
     invalidForm :: String -> LispM ()
@@ -126,42 +125,31 @@ primitives = H.fromList [
     carE _          = invalidForm "car"
     cdrE [Cell _ v] = returnExpr v
     cdrE _          = invalidForm "cdr"
-    lambdaE :: [Expression] -> LispM ()
-    lambdaE [] = invalidForm "lambda"
-    lambdaE (bindings:bodies) = do
-      case fromConsList bindings >>= fromAtoms (Just []) of
-        Nothing -> invalidForm "lambda"
-        Just bindings' -> returnExpr $ mkLambda bindings' bodies
-      where
-        fromAtoms acc [] = acc
-        fromAtoms acc ((Atom a):xs) = fromAtoms (fmap ((:) a) acc) xs -- TODO: will this screw up order?
-        fromAtoms _ _ = Nothing
     displayE = mapM_ (liftIO . print)
     letBangE [Atom k, v] = insertEnv k v
     letBangE _           = invalidForm "let!"
     isIntegerE [Integer _] = returnExpr LispTrue
     isIntegerE [_]         = returnExpr LispFalse
     isIntegerE _           = invalidForm "integer?"
-    -- isRealE    (Cell (Real _) Null)    = returnExpr LispTrue
-    -- isRealE    (Cell _ Null)           = returnExpr LispFalse
-    -- isRealE    _                       = invalidForm "real?"
-    -- isStringE  (Cell (String _) Null)  = returnExpr LispTrue
-    -- isStringE  (Cell _ Null)           = returnExpr LispFalse
-    -- isStringE  _                       = invalidForm "string?"
-    -- isAtomE    (Cell (Atom _) Null)    = returnExpr LispTrue
-    -- isAtomE    (Cell _ Null)           = returnExpr LispFalse
-    -- isAtomE    _                       = invalidForm "atom?"
-    -- isNullE    (Cell Null Null)        = returnExpr LispTrue
-    -- isNullE    (Cell _ Null)           = returnExpr LispFalse
-    -- isNullE    _                       = invalidForm "null?"
-    -- isListE    (Cell (Cell _ xs) Null) = isListE $ Cell xs Null
-    -- isListE    (Cell Null Null)        = returnExpr LispTrue
-    -- isListE    (Cell _ _)              = returnExpr LispFalse
-    -- isListE    _                       = invalidForm "list?"
-    -- isPairE    (Cell (Cell _ _) _)     = returnExpr LispTrue
-    -- isPairE    (Cell _ _)              = returnExpr LispFalse
-    -- isPairE    _                       = invalidForm "pair?"
-
+    isRealE [Real _] = returnExpr LispTrue
+    isRealE [_]      = returnExpr LispFalse
+    isRealE _        = invalidForm "real?"
+    isStringE [String _] = returnExpr LispTrue
+    isStringE [_]        = returnExpr LispFalse
+    isStringE _          = invalidForm "string?"
+    isAtomE [Atom _] = returnExpr LispTrue
+    isAtomE [_]      = returnExpr LispFalse
+    isAtomE _        = invalidForm "atom?"
+    isNullE [Null] = returnExpr LispTrue
+    isNullE [_]    = returnExpr LispFalse
+    isNullE _      = invalidForm "null?"
+    isListE [Cell _ xs] = isListE $ Cell xs Null
+    isListE [Null]      = returnExpr LispTrue
+    isListE [Cell _ _]  = returnExpr LispFalse -- TODO: verify this
+    isListE [_]         = invalidForm "list?"
+    isPairE [Cell _ (Cell _ _)] = returnExpr LispFalse -- TODO: verify this
+    isPairE [Cell _ _]          = returnExpr LispTrue
+    isPairE _                   = invalidForm "pair?"
     addE [Integer a, Integer b] = returnExpr $ Integer $ a + b
     addE [Integer a, Real b]    = returnExpr $ Real $ (fromInteger a) + b
     addE [Real a, Integer b]    = returnExpr $ Real $ a + (fromInteger b)
