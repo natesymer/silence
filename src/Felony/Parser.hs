@@ -42,19 +42,32 @@ parseExpr = choice [parseQuoted, parseNumber, parseBool, parseAtom, parseString,
 -}
      
 symbol :: Parsec ByteString () Char
-symbol = oneOf "!$%&|*+-/:<=>?@^_~#"
+symbol = satisfy p
+  where p '!' = True
+        p '$' = True
+        p '%' = True
+        p '&' = True
+        p '|' = True
+        p '*' = True
+        p '+' = True
+        p '-' = True
+        p '/' = True
+        p ':' = True
+        p '<' = True
+        p '=' = True
+        p '>' = True
+        p '?' = True
+        p '@' = True
+        p '^' = True
+        p '_' = True
+        p '~' = True
+        p _   = False
 
 whitespace :: Parsec ByteString () Char
 whitespace = newline <|> space
 
 comment :: Parsec ByteString () String
-comment = char ';' >> (manyTill anyToken $ choice [void newline, eof])
-      
-{-
-
-  Atoms
-        
--}
+comment = char ';' *> (manyTill anyToken $ (void newline) <|> eof)
 
 parseAtom :: Parsec ByteString () Expression
 parseAtom = fmap (Atom . B.pack) $ (:)
@@ -62,27 +75,34 @@ parseAtom = fmap (Atom . B.pack) $ (:)
             <*> (many $ letter <|> digit <|> symbol)
 
 parseBool :: Parsec ByteString () Expression
-parseBool = (string "#t" <|> string "#f") >>= f
-  where f "#t" = return $ LispTrue
-        f "#f" = return $ LispFalse
-        f e = unexpected $ "unexpected: " ++ e
-
-{-
-              
-  Strings
-
--} 
+parseBool = true <|> false
+  where true = try $ string "#t" >> return LispTrue
+        false = try $ string "#f" >> return LispFalse
 
 parseString :: Parsec ByteString () Expression
 parseString = String . B.pack <$> between q q (many accepted)
   where q = char '"'
         accepted = noneOf "\"" <|> (char '\\' >> char '\"')
-      
-{-
-              
-  Numbers
 
--}          
+parseQuoted :: Parsec ByteString () Expression
+parseQuoted = do
+  char '\''
+  x <- parseExpr
+  return $ Cell (Atom "quote") (Cell x Null)
+
+-- TODO: allow for syntax like @'(1 2 . 3)@
+parseList :: Parsec ByteString () Expression
+parseList = between lp rp (properList <|> dottedList)
+  where
+    lp = char '('
+    rp = char ')'
+    skipw = skipMany whitespace
+    properList = try $ p id
+      where
+        item = optionMaybe $ skipw *> parseExpr
+        p acc = item >>= maybe (return $ acc Null) (\v -> p $ acc . Cell v)
+    dottedList = try $ Cell <$> parseExpr' <*> (char '.' *> parseExpr')
+      where parseExpr' = skipw *> parseExpr <* skipw
 
 parseNumber :: Parsec ByteString () Expression
 parseNumber = real <|> dec <|> hex <|> binary <|> octal
@@ -107,47 +127,6 @@ sign :: (Num a) => Parsec ByteString () a
 sign = f <$> (optionMaybe $ char '-')
   where f Nothing = 1
         f (Just _) = -1
-    
-{-
-              
-  Quotation
-
--}          
-   
-parseQuoted :: Parsec ByteString () Expression
-parseQuoted = do
-  char '\''
-  x <- parseExpr
-  return $ Cell (Atom "quote") (Cell x Null)
-    
-{-
-
-  Lists
-
--}
-
-parseList :: Parsec ByteString () Expression
-parseList = between lp rp (properList <|> dottedList)
-  where
-    lp = char '('
-    rp = char ')'
-    properList = try $ p id
-      where
-        item = optionMaybe $ skipMany whitespace *> parseExpr
-        p acc = item >>= maybe (return $ acc Null) (\v -> p $ acc . Cell v)
-    dottedList = try $ do
-      skipMany whitespace
-      h <- parseExpr
-      skipMany whitespace
-      char '.'
-      skipMany whitespace
-      t <- parseExpr
-      skipMany whitespace
-      return $ Cell h t
-    
-{-
-  String Coercion
--}
 
 bin2dec :: ByteString -> Integer
 bin2dec = baseNToDec 2 -- Little Endian
@@ -165,4 +144,8 @@ baseNToDec :: Integer -> ByteString -> Integer
 baseNToDec base str = f ((B.length str) - 1) str 0
   where f pos bs ttl = case B.uncons bs of
           Nothing -> ttl
-          Just (x,xs) -> f (pos-1) xs $ ttl + ((base^pos) * (toInteger $ digitToInt x))
+          Just (x,xs) -> if int >= base -- Prevent invalid values!
+                           then position (base-1)
+                           else position int
+            where int = toInteger $ digitToInt x
+                  position v = f (pos-1) xs $ ttl + ((base^pos) * v)
