@@ -1,100 +1,27 @@
-{-# LANGUAGE OverloadedStrings, TupleSections, GADTs, Rank2Types #-}
+{-# LANGUAGE OverloadedStrings, TupleSections #-}
 
-module Felony.Lisp
+module Felony.Semantics
 (
   LispM,
-  Expression(..),
-  Environment,
   evalExpressions
-) where
-
-import Control.Monad.IO.Class
+)
+where
   
-import Data.Monoid
+import Felony.Types
+  
+import Control.Monad.IO.Class
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 
-import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
-  
--- TODO:
--- 1. separate into Felony.Syntax (includes types & parser) & Felony.Semantics (evaluation)
--- 2. rewrite in terms of RWST or StateT
-  
-newtype LispM a = LispM {
-  runLispM :: Environment -> IO (a,Environment,Expression)
-}
 
 evalExpressions :: [Expression] -> IO Expression
 evalExpressions e = thrd <$> runLispM (evaluate e') Empty
   where
     e' = Cell (mkLambda [] e) Null -- Wrap with lambda evaluation
     thrd (_,_,v) = v
-
-instance Functor LispM where
-  fmap f m = LispM $ \env -> fmap f' $ runLispM m env
-    where f' (a,env',expr') = (f a,env',expr')
   
-instance Applicative LispM where
-  pure a = LispM $ \env -> return (a,env,Null)
-  m1 <*> m2 = LispM $ \env -> do
-    (f,env',_) <- runLispM m1 env
-    (a,env'',expr) <- runLispM m2 env'
-    return (f a, env'', expr)
-
-instance Monad LispM where
-  fail msg = LispM $ \_ -> fail msg
-  m >>= k = LispM $ \env -> do
-    (a,env',_) <- runLispM m env
-    runLispM (k a) env'
-
-instance MonadIO LispM where
-  liftIO io = LispM $ \env -> fmap (,env,Null) io
-
-data Expression = Atom ByteString
-                | String ByteString
-                | Integer Integer
-                | Real Double
-                | LispTrue
-                | LispFalse
-                | Procedure ([Expression] -> LispM ())
-                | Null
-                | Cell Expression Expression 
-
-instance Show Expression where
-  show = B.unpack . showExpr
-
-instance Eq Expression where
-  (Atom a) == (Atom b) = a == b
-  (String a) == (String b) = a == b
-  (Real a) == (Real b) = a == b
-  (Integer a) == (Real b) = (fromInteger a) == b
-  (Real b) == (Integer a) = b == (fromInteger a)
-  (Integer a) == (Integer b) = a == b
-  LispTrue == LispTrue = True
-  LispFalse == LispFalse = True
-  Null == Null = True
-  (Cell a as) == (Cell b bs) = a == b && as == bs
-  _ == _ = False
-
-showExpr :: Expression -> ByteString
-showExpr (Cell (Atom "quote") (Cell e Null)) = "'" <> showExpr e
-showExpr (Atom x) = x
-showExpr (String x) = x
-showExpr (Integer x) = B.pack $ show x
-showExpr (Real x) = B.pack $ show x
-showExpr Null = "()"
-showExpr LispTrue  = "#t"
-showExpr LispFalse = "#f"
-showExpr (Procedure _) = "<<procedure>>"
-showExpr c@(Cell _ _) = "(" <> f c <> ")"
-  where f Null = "" 
-        f (Cell a Null) = showExpr a
-        f (Cell a b@(Cell _ _)) = showExpr a <> " " <> f b
-        f (Cell a b) = showExpr a <> " . " <> showExpr b
-        f _ = error "invalid cons list."
-      
 invalidForm :: String -> LispM ()
 invalidForm = lispError . (++) "invalid special form: "
     
@@ -235,9 +162,6 @@ mkLambda bindings bodies = Procedure $ \args -> do
   rets <- mapM evaluateExpr bodies
   popEnvFrame
   returnExpr $ last rets
-
-type EnvFrame = HashMap ByteString Expression
-data Environment = Frame Environment EnvFrame | Empty deriving (Show)
 
 -- |Pop a "stack frame".
 popEnvFrame :: LispM ()

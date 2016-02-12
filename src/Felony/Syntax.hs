@@ -1,11 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Felony.Parser
+
+module Felony.Syntax
 (
+  Expression(..),
   parseFelony
 )
 where
   
-import Felony.Lisp
+import Felony.Types (Expression(..))
+
 import Data.Char
 import Text.Parsec
 import Control.Monad (void)
@@ -27,7 +30,7 @@ parseCode = manyTill (between skipWS skips parseExpr) eof
     
 -- FIXME: Avoid parsing two atoms on one line next to eachother, outside an expr          
 parseExpr :: Parsec ByteString () Expression
-parseExpr = choice [parseQuoted, parseNumber, parseBool, parseAtom, parseString, parseList]
+parseExpr = choice [parseQuoted, parseList, parseNumber, parseBool, parseAtom, parseString]
    
 symbol :: Parsec ByteString () Char
 symbol = satisfy p
@@ -85,11 +88,13 @@ parseList = between lp rp $ list id
     lp = char '('
     rp = char ')'
     skipw = skipMany whitespace
-    parseExpr' = skipw *> parseExpr <* skipw
-    item = optionMaybe $ skipw *> parseExpr'
-    dot = optionMaybe $ skipw *> char '.'
-    list acc = dot >>= maybe (acc <$> parseExpr') (const readItem)
-      where readItem = item >>= maybe (return $ acc Null) (\v -> p $ acc . Cell v)
+    dotted acc = try $ do
+      char '.' <* skipw
+      acc <$> parseExpr
+    proper acc = choice [
+      parseExpr >>= \v -> list $ acc . Cell v,
+      return $ acc Null]
+    list acc = skipw *> (dotted acc <|> proper acc) <* skipw
 
 parseNumber :: Parsec ByteString () Expression
 parseNumber = real <|> dec <|> hex <|> binary <|> octal
