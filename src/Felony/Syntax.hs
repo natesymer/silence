@@ -30,10 +30,10 @@ parseCode = manyTill (between skipWS skips parseExpr) eof
     
 -- FIXME: Avoid parsing two atoms on one line next to eachother, outside an expr          
 parseExpr :: Parsec ByteString () Expression
-parseExpr = choice [parseQuoted, parseList, parseNumber, parseBool, parseAtom, parseString]
+parseExpr = choice [parseQuoted, parseList, parseBool, parseNumber, parseAtom, parseString]
    
 symbol :: Parsec ByteString () Char
-symbol = satisfy p
+symbol = satisfy p <?> "symbol"
   where p '!' = True
         p '$' = True
         p '%' = True
@@ -55,38 +55,34 @@ symbol = satisfy p
         p _   = False
 
 whitespace :: Parsec ByteString () Char
-whitespace = newline <|> space
+whitespace = newline <|> space <?> "whitespace"
 
 comment :: Parsec ByteString () String
-comment = char ';' *> (manyTill anyToken $ (void newline) <|> eof)
+comment = char ';' *> (manyTill anyToken $ (void newline) <|> eof) <?> "comment"
 
 parseAtom :: Parsec ByteString () Expression
-parseAtom = fmap (Atom . B.pack) $ (:)
-            <$> (letter <|> symbol)
-            <*> (many $ letter <|> digit <|> symbol)
+parseAtom = (fmap (Atom . B.pack) $ (:)
+                                <$> (letter <|> symbol)
+                                <*> (many $ letter <|> digit <|> symbol)) <?> "atom"
 
 parseBool :: Parsec ByteString () Expression
-parseBool = true <|> false
-  where true = try $ string "#t" >> return LispTrue
-        false = try $ string "#f" >> return LispFalse
+parseBool = true <|> false <?> "bool"
+  where true = try $ string "#t" *> return LispTrue
+        false = try $ string "#f" *> return LispFalse
 
 parseString :: Parsec ByteString () Expression
-parseString = String . B.pack <$> between q q (many accepted)
+parseString = String . B.pack <$> between q q (many accepted) <?> "string"
   where q = char '"'
         accepted = noneOf "\"" <|> (char '\\' >> char '\"')
 
 parseQuoted :: Parsec ByteString () Expression
-parseQuoted = do
-  char '\''
-  x <- parseExpr
-  return $ Cell (Atom "quote") (Cell x Null)
+parseQuoted = char '\'' *> (wrap <$> parseExpr) <?> "quote"
+  where wrap x = Cell (Atom "quote") (Cell x Null)
 
 -- TODO: ensure evaluated syntax (like quote wrapping) doesn't turn into part of the list
 parseList :: Parsec ByteString () Expression
-parseList = between lp rp $ list id
+parseList = between (char '(') (char ')') (list id) <?> "list"
   where
-    lp = char '('
-    rp = char ')'
     skipw = skipMany whitespace
     dotted acc = try $ do
       char '.' <* skipw
@@ -97,7 +93,7 @@ parseList = between lp rp $ list id
     list acc = skipw *> (dotted acc <|> proper acc) <* skipw
 
 parseNumber :: Parsec ByteString () Expression
-parseNumber = real <|> dec <|> hex <|> binary <|> octal
+parseNumber = real <|> dec <|> hex <|> binary <|> octal <?> "number"
   where
     real = try $ do
       s <- sign
@@ -116,10 +112,11 @@ parseNumber = real <|> dec <|> hex <|> binary <|> octal
     octal = try $ string "#o" *> ((Integer . oct2dec . B.pack) <$> many1 digit)
     
 sign :: (Num a) => Parsec ByteString () a
-sign = f <$> (optionMaybe $ char '-')
+sign = f <$> (optionMaybe $ char '-') <?> "sign"
   where f Nothing = 1
         f (Just _) = -1
 
+-- TODO: make these parsers
 bin2dec :: ByteString -> Integer
 bin2dec = baseNToDec 2 -- Little Endian
 

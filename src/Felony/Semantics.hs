@@ -21,7 +21,7 @@ evalExpressions e = thrd <$> runLispM (evaluate e') Empty
   where
     e' = Cell (mkLambda [] e) Null -- Wrap with lambda evaluation
     thrd (_,_,v) = v
-  
+
 invalidForm :: String -> LispM ()
 invalidForm = lispError . (++) "invalid special form: "
     
@@ -49,7 +49,7 @@ primitives = H.fromList [
   ("pair?", Procedure isPairE)
   ]
   where
-    ifE (LispTrue:expr:_)  = evaluate expr
+    ifE [LispTrue,expr,_]  = evaluate expr
     ifE [LispFalse,_,expr] = evaluate expr
     ifE _                  = invalidForm "if"
     notE [LispFalse] = returnExpr LispTrue
