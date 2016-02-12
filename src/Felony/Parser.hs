@@ -91,18 +91,18 @@ parseQuoted = do
   return $ Cell (Atom "quote") (Cell x Null)
 
 -- TODO: allow for syntax like @'(1 2 . 3)@
+-- TODO: ensure evaluated syntax (like quote wrapping) doesn't turn into part of the list
 parseList :: Parsec ByteString () Expression
-parseList = between lp rp (properList <|> dottedList)
+parseList = between lp rp $ list id
   where
     lp = char '('
     rp = char ')'
     skipw = skipMany whitespace
-    properList = try $ p id
-      where
-        item = optionMaybe $ skipw *> parseExpr
-        p acc = item >>= maybe (return $ acc Null) (\v -> p $ acc . Cell v)
-    dottedList = try $ Cell <$> parseExpr' <*> (char '.' *> parseExpr')
-      where parseExpr' = skipw *> parseExpr <* skipw
+    parseExpr' = skipw *> parseExpr <* skipw
+    item = optionMaybe $ skipw *> parseExpr'
+    dot = optionMaybe $ skipw *> char '.'
+    list acc = dot >>= maybe (acc <$> parseExpr') (const readItem)
+      where readItem = item >>= maybe (return $ acc Null) (\v -> p $ acc . Cell v)
 
 parseNumber :: Parsec ByteString () Expression
 parseNumber = real <|> dec <|> hex <|> binary <|> octal
