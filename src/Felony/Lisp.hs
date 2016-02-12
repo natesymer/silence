@@ -2,13 +2,10 @@
 
 module Felony.Lisp
 (
-  LispM(..),
+  LispM,
   Expression(..),
   Environment,
-  evalExpressions,
-  evaluate,
-  toConsList,
-  mkLambda
+  evalExpressions
 ) where
 
 import Control.Monad.IO.Class
@@ -184,27 +181,30 @@ primitives = H.fromList [
 lispError :: String -> LispM ()
 lispError = error
 
+evaluateExpr :: Expression -> LispM Expression
+evaluateExpr = returnedExpr . evaluate
+
 -- |Evaluate an expression
 evaluate :: Expression -> LispM ()
 evaluate (Cell (Atom "quote") (Cell v Null)) = returnExpr v
 evaluate (Cell (Atom "quote") _) = invalidForm "quote"
-evaluate (Cell (Atom "lambda") (Cell bindings bodies)) = do
-  case (fromConsList bindings >>= fromAtoms, fromConsList bodies) of
-    (Just bindings', Just bodies') -> returnExpr $ mkLambda bindings' bodies'
-    _ -> invalidForm "lambda"
+evaluate (Cell (Atom "lambda") (Cell car cdr)) =
+  maybe (invalidForm "lambda") returnExpr $ maybeLambda car cdr
   where
+    maybeLambda bindings bodies = mkLambda
+                                  <$> (fromConsList bindings >>= fromAtoms)
+                                  <*> (fromConsList bodies)
     fromAtoms = foldr f (Just [])
-      where f (Atom a) b = ((:) a) <$> b
+      where f (Atom a) b = fmap ((:) a) b
             f _        _ = Nothing
 evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
-evaluate (Cell x xs) = (getReturnedExpr $ evaluate x) >>= f
-  where f (Procedure act) = do
-          case fromConsList xs of
-            Nothing -> error "invalid s-expression: cdr not a cons list."
-            Just xs' -> mapM (getReturnedExpr . evaluate) xs' >>= act
+evaluate (Cell x xs) = evaluateExpr x >>= f
+  where f (Procedure act) = maybe 
+                              (error "invalid s-expression: cdr not a cons list.")
+                              (\xs' -> mapM evaluateExpr xs' >>= act)
+                              (fromConsList xs)
         f _ = error "invalid s-expression: car not a procedure."
-evaluate (Atom a) = do
-  LispM $ \env -> f env $ Frame env primitives
+evaluate (Atom a) = LispM $ \env -> f env $ Frame env primitives
   where
     f env (Frame xs x) = maybe (f env xs) (return . ((),env,)) $! H.lookup a x
     f _ Empty = error $ "cannot find " ++ B.unpack a
@@ -213,25 +213,22 @@ evaluate x = returnExpr x
 returnExpr :: Expression -> LispM ()
 returnExpr e = LispM $ \env -> return ((),env,e)
 
-getReturnedExpr :: LispM () -> LispM Expression
-getReturnedExpr (LispM f) = LispM $ \env -> (\(_,env',e) -> (e,env',Null)) <$> f env
+returnedExpr :: LispM () -> LispM Expression
+returnedExpr (LispM l) = LispM $ fmap f . l
+  where f (_,env,e) = (e,env,e)
 
 -- |Transform a cons list into a haskell list.
 fromConsList :: Expression -> Maybe [Expression]
-fromConsList = f $ Just []
+fromConsList = f (Just [])
   where f acc Null = acc
         f acc (Cell x xs) = f (fmap (flip (++) [x]) acc) xs
         f _ _ = Nothing
-
--- |Transform a Haskell list into a cons list.
-toConsList :: [Expression] -> Expression
-toConsList = foldr Cell Null
 
 -- |Construct a lambda from bindings and bodies.
 mkLambda :: [ByteString] -> [Expression] -> Expression
 mkLambda bindings bodies = Procedure $ \args -> do
   pushEnvFrame $ H.fromList $ zip bindings args
-  rets <- mapM (getReturnedExpr . evaluate) bodies
+  rets <- mapM evaluateExpr bodies
   popEnvFrame
   returnExpr $ last rets
 

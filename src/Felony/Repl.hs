@@ -1,20 +1,26 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Felony.Repl where
-import           Felony.Lisp
-import           Felony.Parser
-import           System.IO
-import           Control.Exception.Base hiding (evaluate)
-import           GHC.IO.Exception 
+module Felony.Repl
+(
+  repl,
+  terminalRepl,
+  evalCode
+)
+where
 
-catcher :: String -> IO Expression
-catcher errmsg = putStrLn errmsg >> return Null
+import Felony.Lisp
+import Felony.Parser
+import System.IO
+import Control.Exception.Base hiding (evaluate)
+import GHC.IO.Exception 
+import Data.ByteString.Char8 (ByteString)
+import qualified Data.ByteString.Char8 as B
 
 repl :: Handle -> Handle -> String -> IO ()
 repl outp inp prompt = do
   hPutStr outp prompt
   hFlush outp
-  (try $ hGetLine inp) >>= \i -> case i of
+  (try $ B.hGetLine inp) >>= \i -> case i of
     Left (IOError _ EOF _ _ _ _) -> return ()
     Left (IOError _ _ _ errormessage _ _) -> hPutStrLn outp $ "Error: " ++ errormessage
     Right str -> do
@@ -24,5 +30,5 @@ repl outp inp prompt = do
 terminalRepl :: String -> IO ()
 terminalRepl prompt = repl stdout stdin prompt
 
-evalCode :: String -> IO Expression
+evalCode :: ByteString -> IO Expression
 evalCode = evalExpressions . parseFelony
