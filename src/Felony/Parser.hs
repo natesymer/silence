@@ -13,13 +13,7 @@ import Data.Monoid
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
-
-{-
-
-  General
-                
--}
-   
+ 
 parseFelony :: ByteString -> [Expression]
 parseFelony = f . parse parseCode ""
   where f (Left err) = error $ "Invalid syntax: " ++ show err 
@@ -34,13 +28,7 @@ parseCode = manyTill (between skipWS skips parseExpr) eof
 -- FIXME: Avoid parsing two atoms on one line next to eachother, outside an expr          
 parseExpr :: Parsec ByteString () Expression
 parseExpr = choice [parseQuoted, parseNumber, parseBool, parseAtom, parseString, parseList]
-
-{-
-
-  DRY
-  
--}
-     
+   
 symbol :: Parsec ByteString () Char
 symbol = satisfy p
   where p '!' = True
@@ -90,7 +78,6 @@ parseQuoted = do
   x <- parseExpr
   return $ Cell (Atom "quote") (Cell x Null)
 
--- TODO: allow for syntax like @'(1 2 . 3)@
 -- TODO: ensure evaluated syntax (like quote wrapping) doesn't turn into part of the list
 parseList :: Parsec ByteString () Expression
 parseList = between lp rp $ list id

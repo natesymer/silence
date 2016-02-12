@@ -18,6 +18,10 @@ import qualified Data.ByteString.Char8 as B
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
   
+-- TODO:
+-- 1. separate into Felony.Syntax (includes types & parser) & Felony.Semantics (evaluation)
+-- 2. rewrite in terms of RWST or StateT
+  
 newtype LispM a = LispM {
   runLispM :: Environment -> IO (a,Environment,Expression)
 }
@@ -93,7 +97,7 @@ showExpr c@(Cell _ _) = "(" <> f c <> ")"
       
 invalidForm :: String -> LispM ()
 invalidForm = lispError . (++) "invalid special form: "
-        
+    
 -- |Primitive procedures.
 primitives :: EnvFrame
 primitives = H.fromList [
