@@ -37,7 +37,7 @@ evaluate (Cell (Atom "lambda") (Cell car cdr)) = maybe (invalidForm "lambda") re
 evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
 evaluate (Cell x xs) = evaluate x >>= f
   where f (Procedure act) = maybe (error "invalid s-expression: cdr not a cons list.")
-                                  (\xs' -> mapM evaluate xs' >>= act)
+                                  ((act =<<) . mapM evaluate)
                                   (fromConsList xs)
         f _ = error "invalid s-expression: car not a procedure."
 evaluate (Atom a) = get >>= f
@@ -74,6 +74,10 @@ primitives = H.fromList [
   ("car",Procedure carE),
   ("cdr",Procedure cdrE),
   ("=",Procedure eqlE),
+  (">",Procedure gtE),
+  (">=",Procedure gteE),
+  ("<",Procedure ltE),
+  ("<=",Procedure lteE),
   ("+",Procedure addE),
   ("-", Procedure subE),
   ("*", Procedure mulE),
@@ -144,5 +148,29 @@ primitives = H.fromList [
     divE [Real a, Integer b]    = return $ Real $ a / (fromInteger b)
     divE [Real a, Real b]       = return $ Real $ a / b
     divE _                      = invalidForm "/"
-    eqlE [a,b]                  = return $ if a == b then LispTrue else LispFalse
-    eqlE _                      = invalidForm "=="
+    eqlE [a,b]                  = return $ lispBool $ a == b
+    eqlE _                      = invalidForm "="
+    gtE  [Integer a, Integer b] = return $ lispBool $ a > b
+    gtE  [Real a, Integer b]    = return $ lispBool $ a > (fromInteger b)
+    gtE  [Integer a, Real b]    = return $ lispBool $ (fromInteger a) > b
+    gtE  [Real a, Real b]       = return $ lispBool $ a > b
+    gtE  _                      = invalidForm ">"
+    gteE  [Integer a, Integer b] = return $ lispBool $ a >= b
+    gteE  [Real a, Integer b]    = return $ lispBool $ a >= (fromInteger b)
+    gteE  [Integer a, Real b]    = return $ lispBool $ (fromInteger a) >= b
+    gteE  [Real a, Real b]       = return $ lispBool $ a >= b
+    gteE  _                      = invalidForm ">="
+    ltE  [Integer a, Integer b] = return $ lispBool $ a < b
+    ltE  [Real a, Integer b]    = return $ lispBool $ a < (fromInteger b)
+    ltE  [Integer a, Real b]    = return $ lispBool $ (fromInteger a) < b
+    ltE  [Real a, Real b]       = return $ lispBool $ a < b
+    ltE  _                      = invalidForm "<"
+    lteE  [Integer a, Integer b] = return $ lispBool $ a <= b
+    lteE  [Real a, Integer b]    = return $ lispBool $ a <= (fromInteger b)
+    lteE  [Integer a, Real b]    = return $ lispBool $ (fromInteger a) <= b
+    lteE  [Real a, Real b]       = return $ lispBool $ a <= b
+    lteE  _                      = invalidForm "<="
+    
+lispBool :: Bool -> Expression
+lispBool True = LispTrue
+lispBool False = LispFalse
