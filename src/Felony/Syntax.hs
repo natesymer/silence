@@ -25,7 +25,7 @@ parseCode = manyTill (skips *> parseExpr <* skips) eof
   where skips = try $ skipMany $ (void whitespace <|> void comment)
       
 parseExpr :: Parsec ByteString () Expression
-parseExpr = choice [parseQuoted, parseList, parseBool, parseNumber, parseAtom, parseString]
+parseExpr = choice [parseQuoted, parseList, parseAtom, parseBool, parseNumber, parseString]
   
 symbol :: Parsec ByteString () Char
 symbol = satisfy p <?> "symbol"
@@ -41,8 +41,8 @@ comment :: Parsec ByteString () String
 comment = char ';' *> (manyTill anyToken $ (void newline) <|> eof) <?> "comment"
 
 parseAtom :: Parsec ByteString () Expression
-parseAtom = (fmap (Atom . B.pack) $ (:) <$> ld <*> (many $ ld <|> symbol)) <?> "atom"
-  where ld = letter <|> digit
+parseAtom = (fmap (Atom . B.pack) $ (:) <$> ls <*> (many $ ls <|> digit)) <?> "atom"
+  where ls = letter <|> symbol
 
 parseBool :: Parsec ByteString () Expression
 parseBool = true <|> false <?> "bool"
