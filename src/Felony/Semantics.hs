@@ -9,10 +9,13 @@ where
   
 {- TODO:
 * call/cc & concurrency
+* first class environments
+* standard library
 * rethink strings (list of atoms?, integers?)
 * more printing facilities involving strings
 * I/O (console, files)
 * math ops (trig, rounding)
+* maybe pattern matching
 -}
   
 import Felony.Types
