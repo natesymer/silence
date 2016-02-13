@@ -48,12 +48,13 @@ evaluate (Atom a) = get >>= f
     f Empty = error $ "cannot find " ++ B.unpack a
 evaluate x = return x
 
--- TODO: this is a huge bottleneck - O(n^2) due to @(++ [x])@
--- |Transform a cons list into a haskell list.
+-- |Transform a cons list into a haskell list. It builds a function 
+-- that takes an empty list and returns a list of expressions.
+-- eg: (@(Just $ id . (:) x . (:) x) <*> (Just [])@)
 fromConsList :: Expression -> Maybe [Expression]
-fromConsList = f (Just [])
-  where f acc Null = acc
-        f acc (Cell x xs) = f ((++ [x]) <$> acc) xs
+fromConsList = f (Just id)
+  where f acc Null = acc <*> Just []
+        f acc (Cell x xs) = f (fmap (. (:) x) acc) xs
         f _ _ = Nothing
 
 -- |Construct a lambda from bindings and bodies.
