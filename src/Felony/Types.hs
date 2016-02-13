@@ -31,7 +31,7 @@ data Expression = Atom ByteString
                 | Real Double
                 | LispTrue
                 | LispFalse
-                | Procedure ([Expression] -> LispM Expression)
+                | Procedure Int ([Expression] -> LispM Expression)
                 | Null
                 | Cell Expression Expression 
 
@@ -60,7 +60,7 @@ showExpr (Real x) = B.pack $ show x
 showExpr Null = "()"
 showExpr LispTrue  = "#t"
 showExpr LispFalse = "#f"
-showExpr (Procedure _) = "<<procedure>>"
+showExpr (Procedure argc _) = "<<procedure arity:" <> (B.pack $ show argc) <> ">>"
 showExpr c@(Cell _ _) = "(" <> f c <> ")"
   where f Null = "" 
         f (Cell a Null) = showExpr a

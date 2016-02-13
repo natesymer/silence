@@ -38,9 +38,14 @@ evaluate (Cell (Atom "lambda") (Cell car cdr)) = maybe (invalidForm "lambda") re
           fromAtom _        = Nothing
 evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
 evaluate (Cell x xs) = evaluate x >>= f
-  where f (Procedure act) = maybe (error "invalid s-expression: cdr not a cons list.")
-                                  ((act =<<) . mapM evaluate)
-                                  (fromConsList xs)
+  where f p@(Procedure _ _) = maybe (error "invalid s-expression: cdr not a cons list.")
+                                       (((apply p) =<<) . mapM evaluate)
+                                       (fromConsList xs)
+          where apply (Procedure 0 act) [] = act []
+                apply (Procedure 0 _) _ = error "procedure applied too many times"
+                apply p'@(Procedure _ _) [] = return p'
+                apply (Procedure argc act) (a:as) = apply (Procedure (argc-1) $ \args -> act (a:args)) as
+                apply _ _ = error "invalid procedure application"
         f _ = error "invalid s-expression: car not a procedure."
 evaluate (Atom a) = get >>= f
   where
@@ -59,41 +64,41 @@ fromConsList = f (Just id)
 
 -- |Construct a lambda from bindings and bodies.
 mkLambda :: [ByteString] -> [Expression] -> Expression
-mkLambda bindings bodies = Procedure $ \args -> do
+mkLambda bindings bodies = Procedure (length bindings) $ \args -> do
   modify (flip Frame $ bind args)
   rets <- mapM evaluate bodies
   modify pop
   return $ last rets
   where
     bind = H.fromList . zip bindings
-    pop Empty = error "Cannot pop empty stack."
+    pop Empty = error "cannot pop empty stack."
     pop (Frame xs _) = xs
     
 -- |Primitive 'Procedure' 'Expression's that cannot be implemented in lisp.
 primitives :: EnvFrame
 primitives = H.fromList [
-  ("not",Procedure notE),
-  ("cons",Procedure consE),
-  ("car",Procedure carE),
-  ("cdr",Procedure cdrE),
-  ("=",Procedure eqlE),
-  (">",Procedure gtE),
-  (">=",Procedure gteE),
-  ("<",Procedure ltE),
-  ("<=",Procedure lteE),
-  ("+",Procedure addE),
-  ("-", Procedure subE),
-  ("*", Procedure mulE),
-  ("/", Procedure divE),
-  ("display", Procedure displayE), -- print a value
-  ("bind!", Procedure letBangE), -- bind a value to an atom in the root/global env
-  ("integer?", Procedure isIntegerE),
-  ("real?", Procedure isRealE),
-  ("string?", Procedure isStringE),
-  ("atom?", Procedure isAtomE),
-  ("null?", Procedure isNullE),
-  ("list?", Procedure isListE),
-  ("pair?", Procedure isPairE)]
+  ("not",Procedure 1 notE),
+  ("cons",Procedure 2 consE),
+  ("car",Procedure 1 carE),
+  ("cdr",Procedure 1 cdrE),
+  ("=",Procedure 2 eqlE),
+  (">",Procedure 2 gtE),
+  (">=",Procedure 2 gteE),
+  ("<",Procedure 2 ltE),
+  ("<=",Procedure 2 lteE),
+  ("+",Procedure 2 addE),
+  ("-", Procedure 2 subE),
+  ("*", Procedure 2 mulE),
+  ("/", Procedure 2 divE),
+  ("display", Procedure 1 displayE), -- print a value
+  ("bind!", Procedure 2 letBangE), -- bind a value to an atom in the root/global env
+  ("integer?", Procedure 1 isIntegerE),
+  ("real?", Procedure 1 isRealE),
+  ("string?", Procedure 1 isStringE),
+  ("atom?", Procedure 1 isAtomE),
+  ("null?", Procedure 1 isNullE),
+  ("list?", Procedure 1 isListE),
+  ("pair?", Procedure 1 isPairE)]
   where
     notE [LispFalse] = return LispTrue
     notE [LispTrue]  = return LispFalse
