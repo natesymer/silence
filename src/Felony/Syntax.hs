@@ -20,17 +20,17 @@ parseFelony = f . parse parseCode ""
 
 parseCode :: Parsec ByteString () [Expression]
 parseCode = manyTill (skips *> parseExpr <* skips) eof
-  where skips = try $ skipMany $ (void whitespace <|> void comment)
+  where skips = try $ skipMany $ void whitespace <|> void comment
       
 parseExpr :: Parsec ByteString () Expression
 parseExpr = choice [parseQuoted, parseList, parseAtom, parseBool, parseNumber, parseString]
   
 symbol :: Parsec ByteString () Char
 symbol = satisfy p <?> "symbol"
-  where p '!' = True; p '$' = True; p '%' = True; p '&' = True; p '|' = True
-        p '*' = True; p '+' = True; p '-' = True; p '/' = True; p ':' = True
-        p '<' = True; p '=' = True; p '>' = True; p '?' = True; p '@' = True
-        p '^' = True; p '_' = True; p '~' = True; p _   = False
+  where p '!' = True; p '$' = True; p '%' = True; p '&' = True; p '|' = True; p '*' = True
+        p '+' = True; p '-' = True; p '/' = True; p ':' = True; p '<' = True; p '=' = True
+        p '>' = True; p '?' = True; p '@' = True; p '^' = True; p '_' = True; p '~' = True
+        p _   = False
 
 whitespace :: Parsec ByteString () Char
 whitespace = newline <|> space <?> "whitespace"
@@ -60,7 +60,7 @@ parseList :: Parsec ByteString () Expression
 parseList = char '(' *> list id <* char ')' <?> "list"
   where skipw = skipMany whitespace
         dotted acc = try $ char '.' *> skipw *> (acc <$> parseExpr)
-        proper acc = option (acc Null) (parseExpr >>= \v -> list $ acc . Cell v)
+        proper acc = option (acc Null) (parseExpr >>= list . (acc .) . Cell)
         list acc = skipw *> (dotted acc <|> proper acc) <* skipw
 
 parseNumber :: Parsec ByteString () Expression
@@ -74,9 +74,7 @@ parseNumber = real <|> dec <|> hex <|> binary <|> octal <?> "number"
         hex    = try $ string "#x" *> (Integer <$> baseN 16)
         binary = try $ string "#b" *> (Integer <$> baseN 2)
         octal  = try $ string "#o" *> (Integer <$> baseN 8)
-    
-sign :: (Num a) => Parsec ByteString () a
-sign = option 1 (char '-' *> return (-1)) <?> "sign"
+        sign = option 1 $ char '-' *> return (-1)
 
 baseN :: Integer -> Parsec ByteString () Integer
 baseN n = many1 alphaNum >>= f 0

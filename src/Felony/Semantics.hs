@@ -7,6 +7,14 @@ module Felony.Semantics
 )
 where
   
+{- TODO:
+* call/cc & concurrency
+* rethink strings (list of atoms?, integers?)
+* more printing facilities involving strings
+* I/O (console, files)
+* math ops (trig, rounding)
+-}
+  
 import Felony.Types
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict
@@ -38,19 +46,17 @@ evaluate (Cell (Atom "lambda") (Cell car cdr)) = maybe (invalidForm "lambda") re
           fromAtom _        = Nothing
 evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
 evaluate (Cell x xs) = evaluate x >>= f
-  where f p@(Procedure _ _) = maybe (error "invalid s-expression: cdr not a cons list.")
-                                       (((apply p) =<<) . mapM evaluate)
-                                       (fromConsList xs)
-          where apply (Procedure 0 act) [] = act []
-                apply (Procedure 0 _) _ = error "procedure applied too many times"
-                apply p'@(Procedure _ _) [] = return p'
-                apply (Procedure argc act) (a:as) = apply (Procedure (argc-1) $ \args -> act (a:args)) as
-                apply _ _ = error "invalid procedure application"
-        f _ = error "invalid s-expression: car not a procedure."
+  where f p@(Procedure _ _) = maybe err (((apply p) =<<) . mapM evaluate) (fromConsList xs)
+          where err = error "invalid expression: cdr not a cons list"
+                apply    (Procedure 0 act) []     = act []
+                apply    (Procedure 0 _) _        = error "procedure applied too many times"
+                apply p'@(Procedure _ _) []       = return p'
+                apply    (Procedure c act) (a:as) = apply (Procedure (c-1) $ act . (:) a) as
+                apply    _                 _      = error "invalid procedure"
+        f _ = error "invalid expression: car not a procedure"
 evaluate (Atom a) = get >>= f
-  where
-    f (Frame xs x) = maybe (f xs) return $! H.lookup a x
-    f Empty = error $ "cannot find " ++ B.unpack a
+  where f (Frame xs x) = maybe (f xs) return $! H.lookup a x
+        f Empty = error $ "cannot find " ++ B.unpack a
 evaluate x = return x
 
 -- |Transform a cons list into a haskell list. It builds a function 
@@ -65,14 +71,13 @@ fromConsList = f (Just id)
 -- |Construct a lambda from bindings and bodies.
 mkLambda :: [ByteString] -> [Expression] -> Expression
 mkLambda bindings bodies = Procedure (length bindings) $ \args -> do
-  modify (flip Frame $ bind args)
+  modify (push args)
   rets <- mapM evaluate bodies
   modify pop
   return $ last rets
-  where
-    bind = H.fromList . zip bindings
-    pop Empty = error "cannot pop empty stack."
-    pop (Frame xs _) = xs
+  where push args xs = Frame xs (H.fromList $ zip bindings args)
+        pop Empty = error "empty stack"
+        pop (Frame xs _) = xs
     
 -- |Primitive 'Procedure' 'Expression's that cannot be implemented in lisp.
 primitives :: EnvFrame
@@ -111,7 +116,7 @@ primitives = H.fromList [
     cdrE _          = invalidForm "cdr"
     displayE xs = mapM_ (liftIO . print) xs >> return Null
     letBangE [Atom k, v] = modify f >> return v
-      where f Empty = error "No stack frame!"
+      where f Empty = error "empty stack"
             f (Frame Empty x) = Frame Empty (H.insert k v x)
             f (Frame xs x) = Frame (f xs) x
     letBangE _           = invalidForm "let!"
@@ -133,7 +138,7 @@ primitives = H.fromList [
     isListE [Cell _ xs] = isListE [xs]
     isListE [Null]      = return LispTrue
     isListE _           = invalidForm "list?"
-    isPairE [Cell _ (Cell _ _)] = return LispFalse -- TODO: verify this
+    isPairE [Cell _ (Cell _ _)] = return LispFalse
     isPairE [Cell _ _]          = return LispTrue
     isPairE _                   = invalidForm "pair?"
     addE [Integer a, Integer b] = return $ Integer $ a + b
