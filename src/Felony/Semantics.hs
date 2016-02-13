@@ -29,6 +29,8 @@ evaluate (Cell (Atom "if") (Cell x (Cell t (Cell f Null)))) = evaluate x >>= fn
         fn _ = invalidForm "if"
 evaluate (Cell (Atom "quote") (Cell v Null)) = return v
 evaluate (Cell (Atom "quote") _) = invalidForm "quote"
+evaluate (Cell (Atom "define") (Cell a (Cell car cdr))) =
+  evaluate (Cell (Atom "bind!") (Cell a (Cell (Cell (Atom "lambda") (Cell car cdr)) Null)))
 evaluate (Cell (Atom "lambda") (Cell car cdr)) = maybe (invalidForm "lambda") return lambda
     where lambda = mkLambda <$> (fromConsList car >>= fromAtoms) <*> (fromConsList cdr)
           fromAtoms = foldr ((<*>) . fmap (:) . fromAtom) (Just [])
@@ -83,7 +85,7 @@ primitives = H.fromList [
   ("*", Procedure mulE),
   ("/", Procedure divE),
   ("display", Procedure displayE), -- print a value
-  ("let!", Procedure letBangE), -- bind a value to an atom in the root/global env
+  ("bind!", Procedure letBangE), -- bind a value to an atom in the root/global env
   ("integer?", Procedure isIntegerE),
   ("real?", Procedure isRealE),
   ("string?", Procedure isStringE),

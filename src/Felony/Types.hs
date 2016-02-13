@@ -15,13 +15,15 @@ import Data.Monoid
 import Data.HashMap.Strict (HashMap)
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
-  
+
 newtype LispM a = LispM {
   runLispM :: StateT Environment IO a
 } deriving (Functor,Applicative,Monad,MonadIO,MonadState Environment)
 
 type EnvFrame = HashMap ByteString Expression
 data Environment = Frame Environment EnvFrame | Empty deriving (Show)
+
+-- TODO: List-based string implementation
 
 data Expression = Atom ByteString
                 | String ByteString
