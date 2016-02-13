@@ -58,7 +58,7 @@ primitives = H.fromList [
     cdrE [Cell _ v] = returnExpr v
     cdrE _          = invalidForm "cdr"
     displayE = mapM_ (liftIO . print)
-    letBangE [Atom k, v] = insertEnv k v
+    letBangE [Atom k, v] = insertGlobalEnv k v
     letBangE _           = invalidForm "let!"
     isIntegerE [Integer _] = returnExpr LispTrue
     isIntegerE [_]         = returnExpr LispFalse
@@ -158,23 +158,18 @@ fromConsList = f (Just [])
 -- |Construct a lambda from bindings and bodies.
 mkLambda :: [ByteString] -> [Expression] -> Expression
 mkLambda bindings bodies = Procedure $ \args -> do
-  pushEnvFrame $ H.fromList $ zip bindings args
+  LispM $ \env -> return ((),Frame env (bind args),Null)
   rets <- mapM evaluateExpr bodies
-  popEnvFrame
+  LispM pop
   returnExpr $ last rets
+  where
+    bind = H.fromList . zip bindings
+    pop Empty = error "Cannot pop empty stack."
+    pop (Frame xs _) = return ((),xs,Null)
 
--- |Pop a "stack frame".
-popEnvFrame :: LispM ()
-popEnvFrame = LispM f
-  where f Empty = error "Cannot pop empty stack."
-        f (Frame xs _) = return ((),xs,Null)
-
--- |Push a "stack frame"
-pushEnvFrame :: EnvFrame -> LispM ()
-pushEnvFrame child = LispM $ \env -> return ((),Frame env child,Null)
-
--- |Insert a value into the environment.
-insertEnv :: ByteString -> Expression -> LispM ()
-insertEnv k v = LispM f
+-- |Insert a value into the global environment.
+insertGlobalEnv :: ByteString -> Expression -> LispM ()
+insertGlobalEnv k v = LispM $ return . ((),,v) . f
   where f Empty = error "No stack frame!"
-        f (Frame xs x) = return ((),Frame xs (H.insert k v x),v)
+        f (Frame Empty x) = Frame Empty (H.insert k v x)
+        f (Frame xs x) = Frame (f xs) x

@@ -19,3 +19,4 @@ If I find the time (!!), I will implement:
 3. Error handling
 4. First-class environments
 5. Standard libraryw
+6. Pattern matching (Data.List.find to match patterns?)
