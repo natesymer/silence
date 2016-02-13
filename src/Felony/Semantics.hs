@@ -13,8 +13,60 @@ import Control.Monad.State.Strict
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Strict as H
+ 
+evalExpressions :: [Expression] -> IO Expression
+evalExpressions e = evalStateT (runLispM $ evaluate e') (Frame Empty primitives)
+  where e' = Cell (mkLambda [] e) Null -- wrap expressions in a lambda
 
--- |Primitive procedures that cannot be implemented in lisp.
+invalidForm :: String -> LispM a
+invalidForm = error . (++) "invalid special form: "
+
+-- |Evaluate an 'Expression'.
+evaluate :: Expression -> LispM Expression
+evaluate (Cell (Atom "if") (Cell x (Cell t (Cell f Null)))) = evaluate x >>= fn
+  where fn LispTrue = evaluate t
+        fn LispFalse = evaluate f
+        fn _ = invalidForm "if"
+evaluate (Cell (Atom "quote") (Cell v Null)) = return v
+evaluate (Cell (Atom "quote") _) = invalidForm "quote"
+evaluate (Cell (Atom "lambda") (Cell car cdr)) = maybe (invalidForm "lambda") return lambda
+    where lambda = mkLambda <$> (fromConsList car >>= fromAtoms) <*> (fromConsList cdr)
+          fromAtoms = foldr ((<*>) . fmap (:) . fromAtom) (Just [])
+          fromAtom (Atom a) = Just a
+          fromAtom _        = Nothing
+evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
+evaluate (Cell x xs) = evaluate x >>= f
+  where f (Procedure act) = maybe (error "invalid s-expression: cdr not a cons list.")
+                                  (\xs' -> mapM evaluate xs' >>= act)
+                                  (fromConsList xs)
+        f _ = error "invalid s-expression: car not a procedure."
+evaluate (Atom a) = get >>= f
+  where
+    f (Frame xs x) = maybe (f xs) return $! H.lookup a x
+    f Empty = error $ "cannot find " ++ B.unpack a
+evaluate x = return x
+
+-- TODO: this is a huge bottleneck - O(n^2) due to @(++ [x])@
+-- |Transform a cons list into a haskell list.
+fromConsList :: Expression -> Maybe [Expression]
+fromConsList = f (Just [])
+  where f acc Null = acc
+        f acc (Cell x xs) = f ((++ [x]) <$> acc) xs
+        f _ _ = Nothing
+
+-- |Construct a lambda from bindings and bodies.
+mkLambda :: [ByteString] -> [Expression] -> Expression
+mkLambda bindings bodies = Procedure $ \args -> do
+  modify (flip Frame $ bind args)
+  rets <- mapM evaluate bodies
+  modify pop
+  return $ last rets
+  where
+    bind = H.fromList . zip bindings
+    pop Empty = error "Cannot pop empty stack."
+    pop (Frame xs _) = xs
+    
+-- |Primitive 'Procedure' 'Expression's that cannot be implemented in lisp.
 primitives :: EnvFrame
 primitives = H.fromList [
   ("not",Procedure notE),
@@ -26,8 +78,8 @@ primitives = H.fromList [
   ("-", Procedure subE),
   ("*", Procedure mulE),
   ("/", Procedure divE),
-  ("display", Procedure displayE),
-  ("let!", Procedure letBangE),
+  ("display", Procedure displayE), -- print a value
+  ("let!", Procedure letBangE), -- bind a value to an atom in the root/global env
   ("integer?", Procedure isIntegerE),
   ("real?", Procedure isRealE),
   ("string?", Procedure isStringE),
@@ -46,7 +98,10 @@ primitives = H.fromList [
     cdrE [Cell _ v] = return v
     cdrE _          = invalidForm "cdr"
     displayE xs = mapM_ (liftIO . print) xs >> return Null
-    letBangE [Atom k, v] = insertGlobalEnv k v
+    letBangE [Atom k, v] = modify f >> return v
+      where f Empty = error "No stack frame!"
+            f (Frame Empty x) = Frame Empty (H.insert k v x)
+            f (Frame xs x) = Frame (f xs) x
     letBangE _           = invalidForm "let!"
     isIntegerE [Integer _] = return LispTrue
     isIntegerE [_]         = return LispFalse
@@ -91,67 +146,3 @@ primitives = H.fromList [
     divE _                      = invalidForm "/"
     eqlE [a,b]                  = return $ if a == b then LispTrue else LispFalse
     eqlE _                      = invalidForm "=="
-    
-evalExpressions :: [Expression] -> IO Expression
-evalExpressions e = (evalStateT (runLispM $ evaluate e') Empty)
-  where e' = Cell (mkLambda [] e) Null -- wrap expressions in a lambda
-
-invalidForm :: String -> LispM a
-invalidForm = error . (++) "invalid special form: "
-
--- |Evaluate an expression
-evaluate :: Expression -> LispM Expression
-evaluate (Cell (Atom "if") (Cell x (Cell t (Cell f Null)))) = evaluate x >>= fn
-  where fn LispTrue = evaluate t
-        fn LispFalse = evaluate f
-        fn _ = invalidForm "if"
-evaluate (Cell (Atom "quote") (Cell v Null)) = return v
-evaluate (Cell (Atom "quote") _) = invalidForm "quote"
-evaluate (Cell (Atom "lambda") (Cell car cdr)) =
-  maybe (invalidForm "lambda") return $ maybeLambda car cdr
-  where
-    maybeLambda bindings bodies = mkLambda
-                                  <$> (fromConsList bindings >>= fromAtoms)
-                                  <*> (fromConsList bodies)
-    fromAtoms = foldr ((<*>) . fmap (:) . fromAtom) (Just [])
-      where fromAtom (Atom a) = Just a
-            fromAtom _        = Nothing
-evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
-evaluate (Cell x xs) = evaluate x >>= f
-  where f (Procedure act) = maybe
-                              (error "invalid s-expression: cdr not a cons list.")
-                              (\xs' -> mapM evaluate xs' >>= act)
-                              (fromConsList xs)
-        f _ = error "invalid s-expression: car not a procedure."
-evaluate (Atom a) = get >>= f . flip Frame primitives
-  where
-    f (Frame xs x) = maybe (f xs) return $! H.lookup a x
-    f Empty = error $ "cannot find " ++ B.unpack a
-evaluate x = return x
-
--- TODO: this is a huge bottleneck - O(n^2) due to @(++ [x])@
--- |Transform a cons list into a haskell list.
-fromConsList :: Expression -> Maybe [Expression]
-fromConsList = f (Just [])
-  where f acc Null = acc
-        f acc (Cell x xs) = f ((++ [x]) <$> acc) xs
-        f _ _ = Nothing
-
--- |Construct a lambda from bindings and bodies.
-mkLambda :: [ByteString] -> [Expression] -> Expression
-mkLambda bindings bodies = Procedure $ \args -> do
-  modify (flip Frame $ bind args)
-  rets <- mapM evaluate bodies
-  modify pop
-  return $ last rets
-  where
-    bind = H.fromList . zip bindings
-    pop Empty = error "Cannot pop empty stack."
-    pop (Frame xs _) = xs
-
--- |Insert a value into the global environment.
-insertGlobalEnv :: ByteString -> Expression -> LispM Expression
-insertGlobalEnv k v = modify f >> return v
-  where f Empty = error "No stack frame!"
-        f (Frame Empty x) = Frame Empty (H.insert k v x)
-        f (Frame xs x) = Frame (f xs) x
