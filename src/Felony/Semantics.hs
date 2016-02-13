@@ -8,24 +8,13 @@ module Felony.Semantics
 where
   
 import Felony.Types
-  
 import Control.Monad.IO.Class
-
+import Control.Monad.State.Strict
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
-
 import qualified Data.HashMap.Strict as H
 
-evalExpressions :: [Expression] -> IO Expression
-evalExpressions e = thrd <$> runLispM (evaluate e') Empty
-  where
-    e' = Cell (mkLambda [] e) Null -- Wrap with lambda evaluation
-    thrd (_,_,v) = v
-
-invalidForm :: String -> LispM ()
-invalidForm = lispError . (++) "invalid special form: "
-    
--- |Primitive procedures.
+-- |Primitive procedures that cannot be implemented in lisp.
 primitives :: EnvFrame
 primitives = H.fromList [
   ("not",Procedure notE),
@@ -45,131 +34,124 @@ primitives = H.fromList [
   ("atom?", Procedure isAtomE),
   ("null?", Procedure isNullE),
   ("list?", Procedure isListE),
-  ("pair?", Procedure isPairE)
-  ]
+  ("pair?", Procedure isPairE)]
   where
-    notE [LispFalse] = returnExpr LispTrue
-    notE [LispTrue]  = returnExpr LispFalse
+    notE [LispFalse] = return LispTrue
+    notE [LispTrue]  = return LispFalse
     notE _           = invalidForm "not"
-    consE [a,b] = returnExpr $ Cell a b
+    consE [a,b] = return $ Cell a b
     consE _     = invalidForm "cons"
-    carE [Cell v _] = returnExpr v
+    carE [Cell v _] = return v
     carE _          = invalidForm "car"
-    cdrE [Cell _ v] = returnExpr v
+    cdrE [Cell _ v] = return v
     cdrE _          = invalidForm "cdr"
-    displayE = mapM_ (liftIO . print)
+    displayE xs = mapM_ (liftIO . print) xs >> return Null
     letBangE [Atom k, v] = insertGlobalEnv k v
     letBangE _           = invalidForm "let!"
-    isIntegerE [Integer _] = returnExpr LispTrue
-    isIntegerE [_]         = returnExpr LispFalse
+    isIntegerE [Integer _] = return LispTrue
+    isIntegerE [_]         = return LispFalse
     isIntegerE _           = invalidForm "integer?"
-    isRealE [Real _] = returnExpr LispTrue
-    isRealE [_]      = returnExpr LispFalse
+    isRealE [Real _] = return LispTrue
+    isRealE [_]      = return LispFalse
     isRealE _        = invalidForm "real?"
-    isStringE [String _] = returnExpr LispTrue
-    isStringE [_]        = returnExpr LispFalse
+    isStringE [String _] = return LispTrue
+    isStringE [_]        = return LispFalse
     isStringE _          = invalidForm "string?"
-    isAtomE [Atom _] = returnExpr LispTrue
-    isAtomE [_]      = returnExpr LispFalse
+    isAtomE [Atom _] = return LispTrue
+    isAtomE [_]      = return LispFalse
     isAtomE _        = invalidForm "atom?"
-    isNullE [Null] = returnExpr LispTrue
-    isNullE [_]    = returnExpr LispFalse
+    isNullE [Null] = return LispTrue
+    isNullE [_]    = return LispFalse
     isNullE _      = invalidForm "null?"
     isListE [Cell _ xs] = isListE [xs]
-    isListE [Null]      = returnExpr LispTrue
+    isListE [Null]      = return LispTrue
     isListE _           = invalidForm "list?"
-    isPairE [Cell _ (Cell _ _)] = returnExpr LispFalse -- TODO: verify this
-    isPairE [Cell _ _]          = returnExpr LispTrue
+    isPairE [Cell _ (Cell _ _)] = return LispFalse -- TODO: verify this
+    isPairE [Cell _ _]          = return LispTrue
     isPairE _                   = invalidForm "pair?"
-    addE [Integer a, Integer b] = returnExpr $ Integer $ a + b
-    addE [Integer a, Real b]    = returnExpr $ Real $ (fromInteger a) + b
-    addE [Real a, Integer b]    = returnExpr $ Real $ a + (fromInteger b)
-    addE [Real a, Real b]       = returnExpr $ Real $ a + b
+    addE [Integer a, Integer b] = return $ Integer $ a + b
+    addE [Integer a, Real b]    = return $ Real $ (fromInteger a) + b
+    addE [Real a, Integer b]    = return $ Real $ a + (fromInteger b)
+    addE [Real a, Real b]       = return $ Real $ a + b
     addE _                      = invalidForm "+"
-    subE [Integer a, Integer b] = returnExpr $ Integer $ a - b
-    subE [Integer a, Real b]    = returnExpr $ Real $ (fromInteger a) - b
-    subE [Real a, Integer b]    = returnExpr $ Real $ a - (fromInteger b)
-    subE [Real a, Real b]       = returnExpr $ Real $ a - b
+    subE [Integer a, Integer b] = return $ Integer $ a - b
+    subE [Integer a, Real b]    = return $ Real $ (fromInteger a) - b
+    subE [Real a, Integer b]    = return $ Real $ a - (fromInteger b)
+    subE [Real a, Real b]       = return $ Real $ a - b
     subE _                      = invalidForm "-"
-    mulE [Integer a, Integer b] = returnExpr $ Integer $ a * b
-    mulE [Integer a, Real b]    = returnExpr $ Real $ (fromInteger a) * b
-    mulE [Real a, Integer b]    = returnExpr $ Real $ a * (fromInteger b)
-    mulE [Real a, Real b]       = returnExpr $ Real $ a * b
+    mulE [Integer a, Integer b] = return $ Integer $ a * b
+    mulE [Integer a, Real b]    = return $ Real $ (fromInteger a) * b
+    mulE [Real a, Integer b]    = return $ Real $ a * (fromInteger b)
+    mulE [Real a, Real b]       = return $ Real $ a * b
     mulE _                      = invalidForm "*"
-    divE [Integer a, Integer b] = returnExpr $ Real $ (fromInteger a) / (fromInteger b)
-    divE [Integer a, Real b]    = returnExpr $ Real $ (fromInteger a) / b
-    divE [Real a, Integer b]    = returnExpr $ Real $ a / (fromInteger b)
-    divE [Real a, Real b]       = returnExpr $ Real $ a / b
+    divE [Integer a, Integer b] = return $ Real $ (fromInteger a) / (fromInteger b)
+    divE [Integer a, Real b]    = return $ Real $ (fromInteger a) / b
+    divE [Real a, Integer b]    = return $ Real $ a / (fromInteger b)
+    divE [Real a, Real b]       = return $ Real $ a / b
     divE _                      = invalidForm "/"
-    eqlE [a,b]                  = returnExpr $ if a == b then LispTrue else LispFalse
+    eqlE [a,b]                  = return $ if a == b then LispTrue else LispFalse
     eqlE _                      = invalidForm "=="
+    
+evalExpressions :: [Expression] -> IO Expression
+evalExpressions e = (evalStateT (runLispM $ evaluate e') Empty)
+  where e' = Cell (mkLambda [] e) Null -- wrap expressions in a lambda
 
--- |Throw an error.
-lispError :: String -> LispM ()
-lispError = error
-
-evaluateExpr :: Expression -> LispM Expression
-evaluateExpr = returnedExpr . evaluate
+invalidForm :: String -> LispM a
+invalidForm = error . (++) "invalid special form: "
 
 -- |Evaluate an expression
-evaluate :: Expression -> LispM ()
-evaluate (Cell (Atom "if") (Cell x (Cell t (Cell f Null)))) = evaluateExpr x >>= fn
+evaluate :: Expression -> LispM Expression
+evaluate (Cell (Atom "if") (Cell x (Cell t (Cell f Null)))) = evaluate x >>= fn
   where fn LispTrue = evaluate t
         fn LispFalse = evaluate f
         fn _ = invalidForm "if"
-evaluate (Cell (Atom "quote") (Cell v Null)) = returnExpr v
+evaluate (Cell (Atom "quote") (Cell v Null)) = return v
 evaluate (Cell (Atom "quote") _) = invalidForm "quote"
 evaluate (Cell (Atom "lambda") (Cell car cdr)) =
-  maybe (invalidForm "lambda") returnExpr $ maybeLambda car cdr
+  maybe (invalidForm "lambda") return $ maybeLambda car cdr
   where
     maybeLambda bindings bodies = mkLambda
                                   <$> (fromConsList bindings >>= fromAtoms)
                                   <*> (fromConsList bodies)
-    fromAtoms = foldr f (Just [])
-      where f (Atom a) b = fmap ((:) a) b
-            f _        _ = Nothing
+    fromAtoms = foldr ((<*>) . fmap (:) . fromAtom) (Just [])
+      where fromAtom (Atom a) = Just a
+            fromAtom _        = Nothing
 evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
-evaluate (Cell x xs) = evaluateExpr x >>= f
+evaluate (Cell x xs) = evaluate x >>= f
   where f (Procedure act) = maybe
                               (error "invalid s-expression: cdr not a cons list.")
-                              (\xs' -> mapM evaluateExpr xs' >>= act)
+                              (\xs' -> mapM evaluate xs' >>= act)
                               (fromConsList xs)
         f _ = error "invalid s-expression: car not a procedure."
-evaluate (Atom a) = LispM $ \env -> f env $ Frame env primitives
+evaluate (Atom a) = get >>= f . flip Frame primitives
   where
-    f env (Frame xs x) = maybe (f env xs) (return . ((),env,)) $! H.lookup a x
-    f _ Empty = error $ "cannot find " ++ B.unpack a
-evaluate x = returnExpr x
+    f (Frame xs x) = maybe (f xs) return $! H.lookup a x
+    f Empty = error $ "cannot find " ++ B.unpack a
+evaluate x = return x
 
-returnExpr :: Expression -> LispM ()
-returnExpr e = LispM $ \env -> return ((),env,e)
-
-returnedExpr :: LispM () -> LispM Expression
-returnedExpr (LispM l) = LispM $ fmap f . l
-  where f (_,env,e) = (e,env,e)
-
+-- TODO: this is a huge bottleneck - O(n^2) due to @(++ [x])@
 -- |Transform a cons list into a haskell list.
 fromConsList :: Expression -> Maybe [Expression]
 fromConsList = f (Just [])
   where f acc Null = acc
-        f acc (Cell x xs) = f (fmap (flip (++) [x]) acc) xs
+        f acc (Cell x xs) = f ((++ [x]) <$> acc) xs
         f _ _ = Nothing
 
 -- |Construct a lambda from bindings and bodies.
 mkLambda :: [ByteString] -> [Expression] -> Expression
 mkLambda bindings bodies = Procedure $ \args -> do
-  LispM $ \env -> return ((),Frame env (bind args),Null)
-  rets <- mapM evaluateExpr bodies
-  LispM pop
-  returnExpr $ last rets
+  modify (flip Frame $ bind args)
+  rets <- mapM evaluate bodies
+  modify pop
+  return $ last rets
   where
     bind = H.fromList . zip bindings
     pop Empty = error "Cannot pop empty stack."
-    pop (Frame xs _) = return ((),xs,Null)
+    pop (Frame xs _) = xs
 
 -- |Insert a value into the global environment.
-insertGlobalEnv :: ByteString -> Expression -> LispM ()
-insertGlobalEnv k v = LispM $ return . ((),,v) . f
+insertGlobalEnv :: ByteString -> Expression -> LispM Expression
+insertGlobalEnv k v = modify f >> return v
   where f Empty = error "No stack frame!"
         f (Frame Empty x) = Frame Empty (H.insert k v x)
         f (Frame xs x) = Frame (f xs) x

@@ -8,11 +8,9 @@ module Felony.Syntax
 where
   
 import Felony.Types (Expression(..))
-
-import Data.Char
-import Text.Parsec
 import Control.Monad
-
+import Text.Parsec
+import Data.Char
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 

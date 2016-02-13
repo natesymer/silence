@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, TupleSections #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving #-}
 module Felony.Types
 (
   Expression(..),
@@ -9,37 +9,16 @@ module Felony.Types
 where
   
 import Control.Monad.IO.Class
+import Control.Monad.State.Strict
 
 import Data.Monoid
-  
 import Data.HashMap.Strict (HashMap)
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
   
--- TODO: rewrite in terms of RWST or StateT
 newtype LispM a = LispM {
-  runLispM :: Environment -> IO (a,Environment,Expression)
-}
-
-instance Functor LispM where
-  fmap f m = LispM $ \env -> fmap f' $ runLispM m env
-    where f' (a,env',expr') = (f a,env',expr')
-  
-instance Applicative LispM where
-  pure a = LispM $ \env -> return (a,env,Null)
-  m1 <*> m2 = LispM $ \env -> do
-    (f,env',_) <- runLispM m1 env
-    (a,env'',expr) <- runLispM m2 env'
-    return (f a, env'', expr)
-
-instance Monad LispM where
-  fail msg = LispM $ \_ -> fail msg
-  m >>= k = LispM $ \env -> do
-    (a,env',_) <- runLispM m env
-    runLispM (k a) env'
-
-instance MonadIO LispM where
-  liftIO io = LispM $ \env -> fmap (,env,Null) io
+  runLispM :: StateT Environment IO a
+} deriving (Functor,Applicative,Monad,MonadIO,MonadState Environment)
 
 type EnvFrame = HashMap ByteString Expression
 data Environment = Frame Environment EnvFrame | Empty deriving (Show)
@@ -50,7 +29,7 @@ data Expression = Atom ByteString
                 | Real Double
                 | LispTrue
                 | LispFalse
-                | Procedure ([Expression] -> LispM ())
+                | Procedure ([Expression] -> LispM Expression)
                 | Null
                 | Cell Expression Expression 
 
