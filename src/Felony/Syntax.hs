@@ -23,10 +23,9 @@ parseFelony = f . parse parseCode ""
         f (Right e) = e
 
 parseCode :: Parsec ByteString () [Expression]
-parseCode = manyTill (between skipWS skips parseExpr) eof
-  where skips = try $ skipMany $ choice [void whitespace, void comment]
-        skipWS = try $ skipMany $ void whitespace
-        -- skipCmnts = try $ skipMany $ void comment
+parseCode = tillEOF $ between skips skips parseExpr
+  where tillEOF p = manyTill p eof
+        skips = try $ skipMany $ (void whitespace <|> void comment)
     
 -- FIXME: Avoid parsing two atoms on one line next to eachother, outside an expr          
 parseExpr :: Parsec ByteString () Expression
@@ -34,25 +33,10 @@ parseExpr = choice [parseQuoted, parseList, parseBool, parseNumber, parseAtom, p
    
 symbol :: Parsec ByteString () Char
 symbol = satisfy p <?> "symbol"
-  where p '!' = True
-        p '$' = True
-        p '%' = True
-        p '&' = True
-        p '|' = True
-        p '*' = True
-        p '+' = True
-        p '-' = True
-        p '/' = True
-        p ':' = True
-        p '<' = True
-        p '=' = True
-        p '>' = True
-        p '?' = True
-        p '@' = True
-        p '^' = True
-        p '_' = True
-        p '~' = True
-        p _   = False
+  where p '!' = True; p '$' = True; p '%' = True; p '&' = True; p '|' = True
+        p '*' = True; p '+' = True; p '-' = True; p '/' = True; p ':' = True
+        p '<' = True; p '=' = True; p '>' = True; p '?' = True; p '@' = True
+        p '^' = True; p '_' = True; p '~' = True; p _   = False
 
 whitespace :: Parsec ByteString () Char
 whitespace = newline <|> space <?> "whitespace"

@@ -28,12 +28,11 @@ invalidForm = lispError . (++) "invalid special form: "
 -- |Primitive procedures.
 primitives :: EnvFrame
 primitives = H.fromList [
-  ("if",Procedure ifE),
   ("not",Procedure notE),
   ("cons",Procedure consE),
   ("car",Procedure carE),
   ("cdr",Procedure cdrE),
-  ("==",Procedure eqlE),
+  ("=",Procedure eqlE),
   ("+",Procedure addE),
   ("-", Procedure subE),
   ("*", Procedure mulE),
@@ -49,9 +48,6 @@ primitives = H.fromList [
   ("pair?", Procedure isPairE)
   ]
   where
-    ifE [LispTrue,expr,_]  = evaluate expr
-    ifE [LispFalse,_,expr] = evaluate expr
-    ifE _                  = invalidForm "if"
     notE [LispFalse] = returnExpr LispTrue
     notE [LispTrue]  = returnExpr LispFalse
     notE _           = invalidForm "not"
@@ -117,6 +113,10 @@ evaluateExpr = returnedExpr . evaluate
 
 -- |Evaluate an expression
 evaluate :: Expression -> LispM ()
+evaluate (Cell (Atom "if") (Cell x (Cell t (Cell f Null)))) = evaluateExpr x >>= fn
+  where fn LispTrue = evaluate t
+        fn LispFalse = evaluate f
+        fn _ = invalidForm "if"
 evaluate (Cell (Atom "quote") (Cell v Null)) = returnExpr v
 evaluate (Cell (Atom "quote") _) = invalidForm "quote"
 evaluate (Cell (Atom "lambda") (Cell car cdr)) =
@@ -130,7 +130,7 @@ evaluate (Cell (Atom "lambda") (Cell car cdr)) =
             f _        _ = Nothing
 evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
 evaluate (Cell x xs) = evaluateExpr x >>= f
-  where f (Procedure act) = maybe 
+  where f (Procedure act) = maybe
                               (error "invalid s-expression: cdr not a cons list.")
                               (\xs' -> mapM evaluateExpr xs' >>= act)
                               (fromConsList xs)
