@@ -11,20 +11,18 @@ import Felony.Types (Expression(..))
 
 import Data.Char
 import Text.Parsec
-import Control.Monad -- (void)
+import Control.Monad
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
- 
+
 parseFelony :: ByteString -> [Expression]
 parseFelony = f . parse parseCode ""
-  where f (Left err) = error $ "Invalid syntax: " ++ show err 
-        f (Right e) = e
+  where f = either (error . mappend "Invalid syntax: " . show) id
 
 parseCode :: Parsec ByteString () [Expression]
-parseCode = tillEOF $ between skips skips parseExpr
-  where tillEOF p = manyTill p eof
-        skips = try $ skipMany $ (void whitespace <|> void comment)
+parseCode = manyTill (skips *> parseExpr <* skips) eof
+  where skips = try $ skipMany $ (void whitespace <|> void comment)
       
 parseExpr :: Parsec ByteString () Expression
 parseExpr = choice [parseQuoted, parseList, parseBool, parseNumber, parseAtom, parseString]
@@ -43,7 +41,8 @@ comment :: Parsec ByteString () String
 comment = char ';' *> (manyTill anyToken $ (void newline) <|> eof) <?> "comment"
 
 parseAtom :: Parsec ByteString () Expression
-parseAtom = (fmap (Atom . B.pack) $ (:) <$> alphaNum <*> (many $ alphaNum <|> symbol)) <?> "atom"
+parseAtom = (fmap (Atom . B.pack) $ (:) <$> ld <*> (many $ ld <|> symbol)) <?> "atom"
+  where ld = letter <|> digit
 
 parseBool :: Parsec ByteString () Expression
 parseBool = true <|> false <?> "bool"
