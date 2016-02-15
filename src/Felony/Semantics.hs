@@ -6,8 +6,10 @@ module Felony.Semantics
   evalExpressions
 )
 where
-  
+
 {- TODO:
+* FIXME quotes in strings
+* function composition
 * call/cc & concurrency
 * first class environments
 * standard library
