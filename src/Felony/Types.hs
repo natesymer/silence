@@ -55,8 +55,8 @@ showExpr :: Expression -> ByteString
 showExpr (Cell (Atom "quote") (Cell e Null)) = "'" <> showExpr e
 showExpr (Atom x) = x
 showExpr (String x) = x
-showExpr (Integer x) = B.pack $ show x
-showExpr (Real x) = B.pack $ show x
+showExpr (Integer x) = B.pack $ show x -- TODO: better means of showing 'Integers's
+showExpr (Real x) = B.pack $ show x -- TODO: better means of showing 'Double's (that doesn't use sci notation)
 showExpr Null = "()"
 showExpr LispTrue  = "#t"
 showExpr LispFalse = "#f"

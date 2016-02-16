@@ -13,26 +13,22 @@ main :: IO ()
 main = getArgs >>= getCommandArgs >>= evalCmd
 
 repl :: Bool -> String -> IO ()
-repl silent prompt = do
-  putStr prompt >> hFlush stdout
-  (try $ B.hGetLine stdin) >>= \i -> case i of
-    Left (IOError _ EOF _ _ _ _) -> return ()
-    Left (IOError _ _ _ msg _ _) -> putStrLn $ "IOError: " ++ msg
-    Right str -> do
-      (evalExpressions $ parseFelony str) >>= if silent then (const $ return ()) else print
-      repl silent prompt
+repl silent prompt = repl' Empty
+  where repl' env = do
+          putStr prompt >> hFlush stdout
+          (try $ B.hGetLine stdin) >>= \i -> case i of
+            Left (IOError _ EOF _ _ _ _) -> return ()
+            Left (IOError _ _ _ msg _ _) -> putStrLn $ "IOError: " ++ msg
+            Right str -> do
+              (res,env') <- evalExpressions env $ parseFelony str
+              when (not silent) $ print res
+              repl' env'
       
-data Cmd = Cmd {
-  cmdFilePath :: Maybe FilePath,
-  cmdSource :: Maybe String,
-  cmdSilent :: Bool,
-  cmdRepl :: Bool,
-  cmdPrompt :: String
-}
+data Cmd = Cmd (Maybe FilePath) (Maybe String) Bool Bool String
 
 evalCmd :: Cmd -> IO ()
-evalCmd (Cmd Nothing (Just src) False False _) = (evalExpressions $ parseFelony $ B.pack src) >>= print
-evalCmd (Cmd Nothing (Just src) True False _) = void $ evalExpressions $ parseFelony $ B.pack src
+evalCmd (Cmd Nothing (Just src) False False _) = (evalExpressions' $ parseFelony $ B.pack src) >>= print . fst
+evalCmd (Cmd Nothing (Just src) True False _) = void $ evalExpressions' $ parseFelony $ B.pack src
 evalCmd (Cmd (Just fp) Nothing silent False _) = do
   src <- readFile fp
   evalCmd $ Cmd Nothing (Just src) silent False ""

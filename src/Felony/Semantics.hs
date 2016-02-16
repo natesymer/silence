@@ -3,13 +3,15 @@
 module Felony.Semantics
 (
   LispM,
-  evalExpressions
+  Environment(..),
+  evalExpressions,
+  evalExpressions'
 )
 where
 
 {- TODO:
 * FIXME quotes in strings
-* function composition
+* vectors?
 * call/cc & concurrency
 * first class environments
 * standard library
@@ -27,12 +29,21 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Strict as H
  
-evalExpressions :: [Expression] -> IO Expression
-evalExpressions e = evalStateT (runLispM $ evaluate e') (Frame Empty primitives)
-  where e' = Cell (mkLambda [] e) Null -- wrap expressions in a lambda
+-- |Evaluate a list of 'Expression's in a new environment.
+evalExpressions' :: [Expression] -> IO (Expression,Environment)
+evalExpressions' = evalExpressions Empty
+ 
+-- |Evaluate a list of 'Expression's in a given environment.
+evalExpressions :: Environment -> [Expression] -> IO (Expression,Environment)
+evalExpressions env es = runStateT (runLispM $ evaluate l) (Frame env primitives)
+  where l = Cell (mkLambda [] es) Null -- wrap expressions in a lambda
 
 invalidForm :: String -> LispM a
 invalidForm = error . (++) "invalid special form: "
+
+lispBool :: Bool -> Expression
+lispBool True = LispTrue
+lispBool False = LispFalse
 
 -- |Evaluate an 'Expression'.
 evaluate :: Expression -> LispM Expression
@@ -60,7 +71,7 @@ evaluate (Cell x xs) = evaluate x >>= f
                 apply    _                 _      = error "invalid procedure"
         f _ = error "invalid expression: car not a procedure"
 evaluate (Atom a) = get >>= f
-  where f (Frame xs x) = maybe (f xs) return $! H.lookup a x
+  where f (Frame xs x) = maybe (f xs) return $ H.lookup a x
         f Empty = error $ "cannot find " ++ B.unpack a
 evaluate x = return x
 
@@ -80,11 +91,15 @@ mkLambda bindings bodies = Procedure (length bindings) $ \args -> do
   rets <- mapM evaluate bodies
   modify pop
   return $ last rets
-  where push args xs = Frame xs (H.fromList $ zip bindings args)
+  where push args xs = Frame xs $ H.fromList $ zip bindings args
         pop Empty = error "empty stack"
         pop (Frame xs _) = xs
     
 -- |Primitive 'Procedure' 'Expression's that cannot be implemented in lisp.
+-- These procedures are not "special" by nature and are evaluated identically
+-- to procedures implemented in Lisp. Forms like "if", "quote", "lambda", and
+-- "define" which break the expression evaluation rules are implemented
+-- directly in 'evaluate'.
 primitives :: EnvFrame
 primitives = H.fromList [
   ("not",Procedure 1 notE),
@@ -108,7 +123,9 @@ primitives = H.fromList [
   ("atom?", Procedure 1 isAtomE),
   ("null?", Procedure 1 isNullE),
   ("list?", Procedure 1 isListE),
-  ("pair?", Procedure 1 isPairE)]
+  ("pair?", Procedure 1 isPairE),
+  (".", Procedure 2 composeE) -- function composition, result of 2nd proc gets passed to 1st proc.
+  ]
   where
     notE [LispFalse] = return LispTrue
     notE [LispTrue]  = return LispFalse
@@ -188,7 +205,6 @@ primitives = H.fromList [
     lteE  [Integer a, Real b]    = return $ lispBool $ (fromInteger a) <= b
     lteE  [Real a, Real b]       = return $ lispBool $ a <= b
     lteE  _                      = invalidForm "<="
-    
-lispBool :: Bool -> Expression
-lispBool True = LispTrue
-lispBool False = LispFalse
+    composeE [Procedure 1 b, Procedure argc a] = return $ Procedure argc $ \args -> (a args) >>= b . (: [])
+    -- TODO: proper error message for incorrect arities?
+    composeE _ = invalidForm "!"
