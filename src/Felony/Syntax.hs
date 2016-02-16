@@ -84,6 +84,13 @@ baseN :: Integer -> Parsec ByteString () Integer
 baseN n = many1 alphaNum >>= f 0
   where f acc [] = return acc
         f acc (x:xs)
-          | int >= n = unexpected "digit is larger than the base."
-          | otherwise = f ((+) acc . (*) int . (^) n . length $ xs) xs
-          where int = toInteger $ digitToInt x
+          | dec < 10 = g dec
+          | hxu < 16 = g hxu
+          | hxl < 16 = g hxl
+          | otherwise = unexpected "non-numeric digit"
+          where dec = fromIntegral $ ord x - ord '0'
+                hxl = fromIntegral $ ord x - ord 'a' + 10
+                hxu = fromIntegral $ ord x - ord 'A' + 10
+                g y
+                  | y >= n = unexpected "digit is larger than the base"
+                  | otherwise = f ((+) acc . (*) y . (^) n . length $ xs) xs
