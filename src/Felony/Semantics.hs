@@ -10,16 +10,14 @@ module Felony.Semantics
 where
 
 {- TODO:
-* FIXME quotes in strings
 * vectors?
 * call/cc & concurrency
 * first class environments
 * standard library
-* rethink strings (list of atoms?, integers?)
-* more printing facilities involving strings
 * I/O (console, files)
+* randomness
 * math ops (trig, rounding)
-* maybe pattern matching
+* pattern matching
 -}
   
 import Felony.Types
@@ -28,6 +26,7 @@ import Control.Monad.State.Strict
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Strict as H
+import Data.Char
  
 -- |Evaluate a list of 'Expression's in a new environment.
 evalExpressions' :: [Expression] -> IO (Expression,Environment)
@@ -56,10 +55,9 @@ evaluate (Cell (Atom "quote") _) = invalidForm "quote"
 evaluate (Cell (Atom "define") (Cell a (Cell car cdr))) =
   evaluate (Cell (Atom "bind!") (Cell a (Cell (Cell (Atom "lambda") (Cell car cdr)) Null)))
 evaluate (Cell (Atom "lambda") (Cell car cdr)) = maybe (invalidForm "lambda") return lambda
-    where lambda = mkLambda <$> (fromConsList car >>= fromAtoms) <*> (fromConsList cdr)
-          fromAtoms = foldr ((<*>) . fmap (:) . fromAtom) (Just [])
-          fromAtom (Atom a) = Just a
-          fromAtom _        = Nothing
+    where lambda = mkLambda <$> (fromExpr atom car) <*> (fromConsList cdr)
+          atom (Atom a) = Just a
+          atom _        = Nothing
 evaluate (Cell (Atom "lambda") _) = invalidForm "lambda"
 evaluate (Cell x xs) = evaluate x >>= f
   where f p@(Procedure _ _) = maybe err (((apply p) =<<) . mapM evaluate) (fromConsList xs)
@@ -83,6 +81,10 @@ fromConsList = f (Just id)
   where f acc Null = acc <*> Just []
         f acc (Cell x xs) = f (fmap (. (:) x) acc) xs
         f _ _ = Nothing
+  
+fromExpr :: (Expression -> Maybe a) -> Expression -> Maybe [a]
+fromExpr f = (>>= (foldr f' (Just []))) . fromConsList
+  where f' = (<*>) . fmap (:) . f
 
 -- |Construct a lambda from bindings and bodies.
 mkLambda :: [ByteString] -> [Expression] -> Expression
@@ -102,6 +104,7 @@ mkLambda bindings bodies = Procedure (length bindings) $ \args -> do
 -- directly in 'evaluate'.
 primitives :: EnvFrame
 primitives = H.fromList [
+  (".", Procedure 2 composeE), -- function composition, result of 2nd proc gets passed to 1st proc.
   ("not",Procedure 1 notE),
   ("cons",Procedure 2 consE),
   ("car",Procedure 1 carE),
@@ -116,7 +119,7 @@ primitives = H.fromList [
   ("*", Procedure 2 mulE),
   ("/", Procedure 2 divE),
   ("display", Procedure 1 displayE), -- print a value
-  ("bind!", Procedure 2 letBangE), -- bind a value to an atom in the root/global env
+  ("bind!", Procedure 2 bindE), -- bind a value to an atom in the root/global env
   ("integer?", Procedure 1 isIntegerE),
   ("real?", Procedure 1 isRealE),
   ("string?", Procedure 1 isStringE),
@@ -124,9 +127,13 @@ primitives = H.fromList [
   ("null?", Procedure 1 isNullE),
   ("list?", Procedure 1 isListE),
   ("pair?", Procedure 1 isPairE),
-  (".", Procedure 2 composeE) -- function composition, result of 2nd proc gets passed to 1st proc.
+  ("pack-string", Procedure 1 packStringE),
+  ("unpack-string", Procedure 1 unpackStringE)
   ]
   where
+    composeE [Procedure 1 b, Procedure argc a] = return $ Procedure argc $ \args -> (a args) >>= b . (: [])
+    -- TODO: proper error message for incorrect arities?
+    composeE _ = invalidForm "."
     notE [LispFalse] = return LispTrue
     notE [LispTrue]  = return LispFalse
     notE _           = invalidForm "not"
@@ -137,11 +144,11 @@ primitives = H.fromList [
     cdrE [Cell _ v] = return v
     cdrE _          = invalidForm "cdr"
     displayE xs = mapM_ (liftIO . print) xs >> return Null
-    letBangE [Atom k, v] = modify f >> return v
+    bindE [Atom k, v] = modify f >> return v
       where f Empty = error "empty stack"
             f (Frame Empty x) = Frame Empty (H.insert k v x)
             f (Frame xs x) = Frame (f xs) x
-    letBangE _           = invalidForm "let!"
+    bindE _           = invalidForm "bind!"
     isIntegerE [Integer _] = return LispTrue
     isIntegerE [_]         = return LispFalse
     isIntegerE _           = invalidForm "integer?"
@@ -205,6 +212,12 @@ primitives = H.fromList [
     lteE  [Integer a, Real b]    = return $ lispBool $ (fromInteger a) <= b
     lteE  [Real a, Real b]       = return $ lispBool $ a <= b
     lteE  _                      = invalidForm "<="
-    composeE [Procedure 1 b, Procedure argc a] = return $ Procedure argc $ \args -> (a args) >>= b . (: [])
-    -- TODO: proper error message for incorrect arities?
-    composeE _ = invalidForm "!"
+    packStringE [c@(Cell _ _)] = f $ fromExpr integer c
+      where integer (Integer i) = Just i
+            integer _           = Nothing
+            f = maybe (invalidForm "pack-string") (return . String . convert)
+            convert = foldr (\a b -> (chr (fromIntegral a)) `B.cons` b) B.empty
+    packStringE _              = invalidForm "pack-string"
+    unpackStringE [String s] = return $ convert s
+      where convert = foldr Cell Null . map (Integer . fromIntegral . ord) . B.unpack
+    unpackStringE _          = invalidForm "unpack-string"

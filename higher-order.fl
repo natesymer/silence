@@ -1,0 +1,43 @@
+; higher-order.fl
+; written by Nathaniel Symer, 2.15.16
+;
+; This is an example of some of the Haskell-esque
+; programming you can do with this language!
+
+; map implementation (not tail recursive!)
+(define 'map (f xs)
+  (if (null? xs)
+    '()
+    (cons
+      (f (car xs))
+      (map f (cdr xs)))))
+
+; using curried functions
+(display
+  (map
+    (+ 1) ; curried function
+    '(0 1 2)))
+  
+;
+; string manipulation
+;
+
+; capitalize a "character" (ASCII integer)
+(define 'to-upper (c)
+  (if (>= c 97)
+    (if (<= c 122)
+      (- c 32)
+      c)
+    c))
+    
+; you can define pointfree functions!
+(bind!
+  'upcase
+  (. ; function composition
+    pack-string
+    (. ; function composition
+      (map to-upper) ; curried function
+      unpack-string)))
+
+(display
+  (upcase "this is my f&*^ing pony, damnit!"))

@@ -15,8 +15,7 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 
 parseFelony :: ByteString -> [Expression]
-parseFelony = f . parse code ""
-  where f = either (error . mappend "Invalid syntax: " . show) id
+parseFelony = either (error . show) id . parse code ""
 
 code :: Parsec ByteString () [Expression]
 code = manyTill (skipw *> expr <* skipw) eof
@@ -37,7 +36,7 @@ eatom = fmap (Atom . B.pack . map toLower) ident <?> "atom"
         initial = letter <|> symbol
         subseq = initial <|> digit <|> exc
         exc = oneOf ".+-"
-        symbol = oneOf "!$%&*/:<=>~_^"
+        symbol = oneOf "?!$%&*/:<=>~_^"
 
 ebool :: Parsec ByteString () Expression
 ebool = true <|> false <?> "bool"
@@ -46,8 +45,8 @@ ebool = true <|> false <?> "bool"
 
 estring :: Parsec ByteString () Expression
 estring = String . B.pack <$> (q *> many accepted <* q) <?> "string"
-  where q = char '"'; bs = char '\\'
-        accepted = satisfy ((/=) '"') <|> (bs *> (q <|> bs))
+  where q = char '"'; bs = char (chr 92)
+        accepted = (bs *> (q <|> bs)) <|> satisfy ((/=) '"')
 
 equoted :: Parsec ByteString () Expression
 equoted = char '\'' *> (wrap <$> expr) <?> "quote"
@@ -55,7 +54,7 @@ equoted = char '\'' *> (wrap <$> expr) <?> "quote"
 
 elist :: Parsec ByteString () Expression
 elist = char '(' *> list' id <* char ')' <?> "list"
-  where skipw = skipMany whitespace
+  where skipw = skipMany (void whitespace <|> void comment)
         list' acc = option (acc Null) $ do
           a <- skipw *> expr <* skipw
           choice [
@@ -63,7 +62,7 @@ elist = char '(' *> list' id <* char ')' <?> "list"
             list' $ acc . Cell a] -- proper
 
 enumber :: Parsec ByteString () Expression
-enumber = choice [real,dec,hex,binary,octal] <?> "number"
+enumber = choice [real,dec,hex,binary,octal,ntal] <?> "number"
   where real = try $ real' <$> (option 0 dec') <*> (char '.' *> (withLength $ baseN 10))
         real' x (base,y) = real'' (fromInteger x) (fromInteger y) base
         real'' x y = Real . (+) x . (/) y . (^) 10.0
@@ -72,6 +71,8 @@ enumber = choice [real,dec,hex,binary,octal] <?> "number"
         hex    = try $ string "#x" *> (Integer <$> baseN 16)
         binary = try $ string "#b" *> (Integer <$> baseN 2)
         octal  = try $ string "#o" *> (Integer <$> baseN 8)
+        ntal   = try $ char '#' *> baseN 10 <* char '|' >>= f >>= fmap Integer . baseN
+          where f n = if n <= 36 then return n else fail "unsupported base greater than 36"
         sign   = option 1 $ char '-' *> return (-1)
         getCol = sourceColumn <$> getPosition
         withLength p = do
@@ -85,12 +86,12 @@ baseN n = many1 alphaNum >>= f 0
   where f acc [] = return acc
         f acc (x:xs)
           | dec < 10 = g dec
-          | hxu < 16 = g hxu
-          | hxl < 16 = g hxl
+          | hxu < 36 = g hxu
+          | hxl < 36 = g hxl
           | otherwise = unexpected "non-numeric digit"
           where dec = fromIntegral $ ord x - ord '0'
                 hxl = fromIntegral $ ord x - ord 'a' + 10
                 hxu = fromIntegral $ ord x - ord 'A' + 10
                 g y
-                  | y >= n = unexpected "digit is larger than the base"
+                  | y >= n = fail "digit is larger than the base"
                   | otherwise = f ((+) acc . (*) y . (^) n . length $ xs) xs
