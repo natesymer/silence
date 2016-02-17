@@ -33,11 +33,7 @@
 ; you can define pointfree functions!
 (bind!
   'upcase
-  (. ; function composition
-    pack-string
-    (. ; function composition
-      (map to-upper) ; curried function
-      unpack-string)))
+  (map to-upper))
 
-(display
+(print
   (upcase "this is my f&*^ing pony, damnit!"))

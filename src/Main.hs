@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Felony
+import Felony.Types
 import System.Environment
 import System.IO
 import Control.Exception.Base hiding (evaluate)
@@ -12,27 +13,27 @@ import Options.Applicative hiding (str)
 main :: IO ()
 main = getArgs >>= getCommandArgs >>= evalCmd
 
-repl :: Bool -> String -> IO ()
-repl silent prompt = repl' Empty
-  where repl' env = do
+repl :: String -> IO ()
+repl p = repl' p Empty
+  where repl' prompt env = do
           putStr prompt >> hFlush stdout
           (try $ B.hGetLine stdin) >>= \i -> case i of
             Left (IOError _ EOF _ _ _ _) -> return ()
             Left (IOError _ _ _ msg _ _) -> putStrLn $ "IOError: " ++ msg
             Right str -> do
+              -- TODO: catch errors & make prompt an error prompt
               (res,env') <- evalExpressions env $ parseFelony str
-              when (not silent) $ print res
-              repl' env'
-      
-data Cmd = Cmd (Maybe FilePath) (Maybe String) Bool Bool String
+              print res
+              repl' prompt env'
+
+data Cmd = Cmd (Maybe FilePath) (Maybe String) Bool String
 
 evalCmd :: Cmd -> IO ()
-evalCmd (Cmd Nothing (Just src) False False _) = (evalExpressions' $ parseFelony $ B.pack src) >>= print . fst
-evalCmd (Cmd Nothing (Just src) True False _) = void $ evalExpressions' $ parseFelony $ B.pack src
-evalCmd (Cmd (Just fp) Nothing silent False _) = do
+evalCmd (Cmd Nothing (Just src) False _) = void $ evalExpressions' $ parseFelony $ B.pack src
+evalCmd (Cmd (Just fp) Nothing False _) = do
   src <- readFile fp
-  evalCmd $ Cmd Nothing (Just src) silent False ""
-evalCmd (Cmd Nothing Nothing silent True prompt) = repl silent prompt
+  evalCmd $ Cmd Nothing (Just src) False ""
+evalCmd (Cmd Nothing Nothing True prompt) = repl prompt
 evalCmd _ = error "invalid arguments."
 
 getCommandArgs :: [String] -> IO Cmd
@@ -43,7 +44,6 @@ getCommandArgs = handleParseResult . execParserPure pprefs parser
     parser' = Cmd
       <$> (optional $ strOption $ opt "file" 'f' "FILEPATH" Nothing "source file to evaluate")
       <*> (optional $ strOption $ opt "evaluate" 'e' "CODE" Nothing "source code to evaluate")
-      <*> (flag False True $ short 's' <> long "silent" <> help "don't print return values")
       <*> (flag False True $ short 'r' <> long "repl" <> help "run a REPL")
       <*> (strOption $ opt "prompt" 't' "PROMPT" (Just "𝝺 ") "what to print at the start of each line")
     opt lng shrt mvar (Just defVal) hlp = (long lng <> short shrt <> metavar mvar <> value defVal <> help hlp)

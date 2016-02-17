@@ -7,7 +7,7 @@ module Felony.Syntax
 )
 where
   
-import Felony.Types (Expression(..))
+import Felony.Types
 import Control.Monad
 import Text.Parsec 
 import Data.Char
@@ -36,17 +36,21 @@ eatom = fmap (Atom . B.pack . map toLower) ident <?> "atom"
         initial = letter <|> symbol
         subseq = initial <|> digit <|> exc
         exc = oneOf ".+-"
-        symbol = oneOf "?!$%&*/:<=>~_^"
+        symbol = oneOf "?!$%&*/|:<=>~_^"
 
 ebool :: Parsec ByteString () Expression
 ebool = true <|> false <?> "bool"
-  where true  = try $ string "#t" *> return LispTrue
-        false = try $ string "#f" *> return LispFalse
+  where true  = try $ string "#t" *> return (Bool True)
+        false = try $ string "#f" *> return (Bool False)
 
+-- TODO: fix escape sequences
 estring :: Parsec ByteString () Expression
-estring = String . B.pack <$> (q *> many accepted <* q) <?> "string"
-  where q = char '"'; bs = char (chr 92)
+estring = wrap . toIntList <$> str <?> "string"
+  where str = q *> many accepted <* q
+        q = char '"'; bs = char (chr 92)
         accepted = (bs *> (q <|> bs)) <|> satisfy ((/=) '"')
+        toIntList = foldr Cell Null . map (Integer . fromIntegral . ord)
+        wrap = Cell (Atom "quote") . flip Cell Null
 
 equoted :: Parsec ByteString () Expression
 equoted = char '\'' *> (wrap <$> expr) <?> "quote"
