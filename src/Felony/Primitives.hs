@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Felony.Primitives
 (
-  primitives
+  primitives,
+  primitiveConstants
 )
 where
   
 import Felony.Syntax
-import Felony.Semantics
-import Felony.Types
+import Felony.Expression
 
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict
@@ -27,48 +27,126 @@ import qualified Data.ByteString.Char8 as B
   -> rounding (round,ceiling,floor)
 * higher-order operators: ($)
 * randomness
+* get-env & put-env
+* improve lambda consistency:
+  • @begin@ procedure to handle sequential evaluation
+  • @lambda@ is no longer of arity @-1@ (it's now @2@)
 -}
 
--- |Primitive 'Procedure' 'Expression's that cannot be implemented in lisp.
--- These procedures are not "special" by nature and are evaluated identically
--- to procedures implemented in Lisp. Forms like "if", "quote", "lambda", and
--- "define" which break the expression evaluation rules are implemented
--- directly in 'evaluate'.
-primitives :: EnvFrame
-primitives = H.fromList [
-  (".", Procedure 2 composeE), -- function composition, result of 2nd proc gets passed to 1st proc.
-  ("not",Procedure 1 notE),
-  ("cons",Procedure 2 consE),
-  ("car",Procedure 1 carE),
-  ("cdr",Procedure 1 cdrE),
-  ("=",Procedure 2 eqlE),
-  (">",Procedure 2 gtE),
-  (">=",Procedure 2 gteE),
-  ("<",Procedure 2 ltE),
-  ("<=",Procedure 2 lteE),
-  ("+",Procedure 2 addE),
-  ("-", Procedure 2 subE),
-  ("*", Procedure 2 mulE),
-  ("/", Procedure 2 divE),
-  ("to-str", Procedure 1 toStrE),
-  ("display", Procedure 1 displayE), -- print a value
-  ("print", Procedure 1 printE), -- print a string
-  ("bind!", Procedure 2 bindE), -- bind a value to an atom in the root/global env
-  ("integer?", Procedure 1 isIntegerE),
-  ("real?", Procedure 1 isRealE),
-  ("string?", Procedure 1 isStringE),
-  ("atom?", Procedure 1 isAtomE),
-  ("null?", Procedure 1 isNullE),
-  ("list?", Procedure 1 isListE),
-  ("pair?", Procedure 1 isPairE),
-  ("&&", Procedure 2 andE),
-  ("||", Procedure 2 orE),
-  ("xor", Procedure 2 xorE),
-  ("evaluate", Procedure 1 evaluateE)]
+primitiveConstants :: Scope
+primitiveConstants = H.fromList []
 
--- TODO: proper error message for incorrect arities?
+-- |Primitive 'Procedure' 'Expression's that cannot be implemented in lisp.
+-- They behave like any other @'Procedure'@ 'Expression', except they may inhibit
+-- evaluation of arguments by 'evaluate'.
+primitives :: Scope
+primitives = H.fromList [
+  ("not",Procedure True 1 notE),
+  ("cons",Procedure True 2 consE),
+  ("car",Procedure True 1 carE),
+  ("cdr",Procedure True 1 cdrE),
+  (".", Procedure True 2 composeE), -- function composition, result of 2nd proc gets passed to 1st proc.
+  ("=",Procedure True 2 eqlE),
+  (">",Procedure True 2 gtE),
+  (">=",Procedure True 2 gteE),
+  ("<",Procedure True 2 ltE),
+  ("<=",Procedure True 2 lteE),
+  ("+",Procedure True 2 addE),
+  ("-", Procedure True 2 subE),
+  ("*", Procedure True 2 mulE),
+  ("/", Procedure True 2 divE),
+  ("&&", Procedure True 2 andE),
+  ("||", Procedure True 2 orE),
+  ("xor", Procedure True 2 xorE),
+  ("to-str", Procedure True 1 toStrE),
+  ("display", Procedure True 1 displayE), -- print a value
+  ("print", Procedure True 1 printE), -- print a string
+  ("bind!", Procedure True 2 bindE), -- bind a value to an atom in the root/global env
+  ("integer?", Procedure True 1 isIntegerE),
+  ("real?", Procedure True 1 isRealE),
+  ("string?", Procedure True 1 isStringE),
+  ("atom?", Procedure True 1 isAtomE),
+  ("null?", Procedure True 1 isNullE),
+  ("list?", Procedure True 1 isListE),
+  ("pair?", Procedure True 1 isPairE),
+  ("evaluate", Procedure True 1 evaluateE),
+  ("if",Procedure False 3 ifE),
+  ("quote",Procedure False 1 quoteE),
+  ("lambda",Procedure False (-1) lambdaE), -- TODO: rethink me (replace sequential behavior with @begin@?)
+  ("define",Procedure False (-1) defineE),
+  ("let",Procedure True 2 letE),
+  ("let!",Procedure True 2 letBangE)
+  ]
+
+ifE :: PrimFunc
+ifE [x,t,f] = evaluate x >>= fn
+  where fn (Bool b) = evaluate (if b then t else f)
+        fn _ = invalidForm "if"
+ifE _ = invalidForm "if"
+
+-- |Standard scheme-esque quote.
+quoteE :: PrimFunc
+quoteE [v] = return v
+quoteE _ = invalidForm "quote"  
+
+-- |Standard scheme-esque lambda.
+lambdaE :: PrimFunc
+lambdaE (_:[]) = invalidForm "lambda: cannot create a body-less lambda"
+lambdaE (car:cdr) = maybe (invalidForm "lambda") return lambda
+  where lambda = mkLambda <$> (fromExpr atom car) <*> (Just cdr)
+        atom (Atom a) = Just a
+        atom _        = Nothing
+lambdaE _ = invalidForm "lambda"
+
+-- |Takes:
+-- key -> what to bind the variable to
+-- val -> value to bind
+-- Returns: function with arity @-1@ that evaluates args given key=val.
+-- example: @((let 'a 1) (+ 1 a))@ returns @2@
+letE :: PrimFunc
+letE [k@(Atom _),v] =
+  return $ Procedure False (-1) $ \args -> do
+    l <- lambdaE ((Cell k Null):args)
+    evaluate (Cell l (Cell v Null))
+letE [_,_] = invalidForm "let: first argument must be an atom"
+letE _ = invalidForm "let"
+
+-- |Takes:
+-- key -> what to bind the variable to
+-- val -> value to bind
+-- Does: Assigns val to key in the current environment scope.
+letBangE :: PrimFunc
+letBangE [Atom k,v] = modify add >> return v
+  where add [] = error "empty stack"
+        add (e:es) = (H.insert k v e):es
+letBangE [_,_] = invalidForm "let!: first argument must be an atom"
+letBangE _ = invalidForm "let"
+
+-- |like letE, except for global (root) env.
+bindE :: PrimFunc
+bindE [Atom k, v] = modify f >> return v
+  where f [] = error "empty stack"
+        f [x] = [H.insert k v x]
+        f (x:xs) = x:f xs
+bindE _ = invalidForm "bind!"
+
+-- evaluate (Cell (Atom "define") (Cell a (Cell car cdr))) =
+--   evaluate (Cell (Atom "bind!") (Cell a (Cell (Cell (Atom "lambda") (Cell car cdr)) Null)))
+--
+defineE :: PrimFunc
+defineE (k:xs) = evaluate k >>= f
+  where
+    f k'@(Atom _) = lambdaE xs >>= bindE . (:) k' . pure
+    f _ = invalidForm "define: procedure name must be an atom"
+defineE _ = invalidForm "define"
+
+-- |Compose two functions of arbitrary arities. If @barity@ is > 1,
+-- this will return a procedure. @((. b a)<args>)@ = @(b (a <args>))@
 composeE :: PrimFunc
-composeE [Procedure 1 b, Procedure argc a] = return $ Procedure argc $ (b . return =<<) . a
+composeE [Procedure _ barity b, Procedure eargs aarity a]
+  | barity < 2 = return $ Procedure eargs aarity ((b . return =<<) . a)
+  | otherwise = return $ Procedure eargs aarity ((apply procb . pure =<<) . a)
+    where procb = Procedure False barity b 
 composeE _ = invalidForm "."
 
 notE :: PrimFunc
@@ -93,13 +171,6 @@ displayE = (>> return Null) . mapM_ (liftIO . print)
 printE :: PrimFunc
 printE [x] = maybe (invalidForm "print") (liftIO . putStr) (fromLispStr x) >> return Null
 printE _   = invalidForm "print"
-
-bindE :: PrimFunc
-bindE [Atom k, v] = modify f >> return v
-  where f Empty = error "empty stack"
-        f (Frame Empty x) = Frame Empty (H.insert k v x)
-        f (Frame xs x) = Frame (f xs) x
-bindE _           = invalidForm "bind!"
 
 isIntegerE :: PrimFunc
 isIntegerE [Integer _] = return $ Bool True

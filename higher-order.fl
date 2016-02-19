@@ -11,6 +11,13 @@
     (cons
       (f (car xs))
       (map f (cdr xs)))))
+      
+(define 'filter (f xs)
+  (if (null? xs)
+    '()
+    (if (f (car xs))
+      (cons (car xs) (filter f (cdr xs)))
+      (filter f (cdr xs)))))
 
 ; using curried functions
 (display
@@ -30,10 +37,16 @@
       c)
     c))
     
-; you can define pointfree functions!
+(define 'printables (str)
+  (filter (< 31) str))
+
 (bind!
   'upcase
   (map to-upper))
 
 (print
-  (upcase "this is my f&*^ing pony, damnit!"))
+  (upcase "this is my f&*^ing pony, damnit!\n"))
+  
+(print
+  ((. upcase printables) ; define pointfree function!
+    "a\0\0\0"))

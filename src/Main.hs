@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Felony
-import Felony.Types
 import System.Environment
 import System.IO
 import Control.Exception.Base hiding (evaluate)
@@ -14,7 +13,7 @@ main :: IO ()
 main = getArgs >>= getCommandArgs >>= evalCmd
 
 repl :: String -> IO ()
-repl p = repl' p Empty
+repl p = repl' p []
   where repl' prompt env = do
           putStr prompt >> hFlush stdout
           (try $ B.hGetLine stdin) >>= \i -> case i of
