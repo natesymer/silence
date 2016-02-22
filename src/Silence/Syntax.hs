@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Felony.Syntax
+module Silence.Syntax
 (
   Expression(..),
-  parseFelony
+  parseSilence
 )
 where
   
-import Felony.Expression
+import Silence.Expression
 
 import Control.Monad
 import Text.Parsec
@@ -15,30 +15,29 @@ import Data.Char
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 
-skipTill :: (Stream s m t) => ParsecT s u m a -> ParsecT s u m () -> ParsecT s u m ()
-skipTill p end = (try end) <|> (p *> skipTill p end)
+skipLine :: Parsec ByteString () ()
+skipLine = void newline <|> void crlf <|> eof <|> (anyToken *> skipLine)
 
-parseFelony :: ByteString -> [Expression]
-parseFelony = either (error . show) id . parse code ""
+-- |Parse code into expressions
+parseSilence :: ByteString -> [Expression]
+parseSilence = either (error . show) id . parse code ""
 
+-- |Parser for code (list of expressions)
 code :: Parsec ByteString () [Expression]
-code = many $ ignored *> expr <* ignored
+code = shebang *> exprs
+  where exprs = (many $ ignored *> expr <* ignored)
+        shebang = try (string "#!" *> skipLine) <?> "shebang"
   
+-- |Parser for an expression.
 expr :: Parsec ByteString () Expression
 expr = choice [equoted,elist,enumber,eatom,estring,ebool]
 
+-- |Skip comments & whitespace
 ignored :: Parsec ByteString () ()
-ignored = try $ skipMany $ void whitespace <|> void comment
-
-whitespace :: Parsec ByteString () Char
-whitespace = (space <|> tab <|> newline <|> crlf) <?> "whitespace"
-
-comment :: Parsec ByteString () ()
-comment = char ';' *> skipTill anyToken lineEnd <?> "comment"
-
-lineEnd :: Parsec ByteString () ()
-lineEnd = void newline <|> void crlf <|> eof
-
+ignored = skipMany $ whitespace <|> comment
+  where whitespace = try (void (space <|> tab <|> newline <|> crlf)) <?> "whitespace"
+        comment = try (char ';' *> skipLine)                         <?> "comment"
+        
 eatom :: Parsec ByteString () Expression
 eatom = fmap (Atom . B.pack) ident <?> "atom"
   where ident = ((:) <$> initial <*> many subseq) <|> (pure <$> exc)
@@ -66,12 +65,12 @@ estring = wrap . toIntList <$> str <?> "string"
           eseq' "CR" 'r' 13,eseq "SO" 14,eseq "SI" 15,eseq "DLE" 16,eseq "DC1" 17,
           eseq "DC2" 18,eseq "DC3" 19,eseq "DC4" 20,eseq "NAK" 21,eseq "SYN" 22,
           eseq "ETB" 23,eseq "CAN" 24,eseq "EM" 25,eseq "SUB" 26,eseq "ESC" 27,
-          eseq "FS" 28,eseq "GS" 29,eseq "RS" 30,eseq "US" 31,bs *> return (chr 92),
+          eseq "FS" 28,eseq "GS" 29,eseq "RS" 30,eseq "US" 31,bs,
           chr . fromInteger <$> baseN 10] <?> "escape sequence")
         eseq :: String -> Int -> Parsec ByteString () Char
         eseq a c = try $ string a *> return (chr c)
         eseq' :: String -> Char -> Int -> Parsec ByteString () Char
-        eseq' a b c = try $ (void (string a) <|> void (char b)) *> return (chr c)
+        eseq' a b c = eseq a c <|> (char b *> return (chr c))
 
 equoted :: Parsec ByteString () Expression
 equoted = char '\'' *> (wrap <$> expr) <?> "quote"
@@ -86,37 +85,36 @@ elist = char '(' *> list' id <* char ')' <?> "list"
 
 enumber :: Parsec ByteString () Expression
 enumber = choice [real,dec,nonBaseTen] <?> "number"
-  where real = try $ real' <$> (option 0 dec') <*> (char '.' *> (withLength $ baseN 10))
-        real' x (base,y) = real'' (fromInteger x) (fromInteger y) base
-        real'' x y = Real . (+) x . (/) y . (^) 10.0
-        dec'   = (*) <$> sign <*> baseN 10
-        dec    = try $ fmap Integer dec'
+  where real = try $ mkReal
+          <$> (fromInteger <$> sign)
+          <*> (fromInteger <$> option 0 (baseN 10))
+          <*> baseNFrac 10
+        mkReal s a = Real . (*) s . (+) a
+        sign = option 1 $ char '-' *> return (-1)
+        dec  = try $ Integer <$> ((*) <$> sign <*> baseN 10)
         nonBaseTen = char '#' *> choice [
-          char 'x' *> (Integer <$> baseN 16),
-          char 'b' *> (Integer <$> baseN 2),
-          char 'o' *> (Integer <$> baseN 8),
-          baseN 10 <* char '|' >>= ntalPred >>= fmap Integer . baseN]
-        ntalPred n
-          | n <= 36 = return $ fromInteger n
-          | otherwise = fail "bases greater than 36 are unsupported"
-        sign   = option 1 $ char '-' *> return (-1)
-        getCol = sourceColumn <$> getPosition
-        withLength p = do
-          c <- getCol
-          p' <- p
-          c' <- getCol
-          return ((c'-c),p')
-
+          char 'x' *> intN 16,
+          char 'b' *> intN 2,
+          char 'o' *> intN 8,
+          baseN 10 <* char '|' >>= intN . fromInteger]
+        intN = fmap Integer . baseN
+          
 baseN :: Int -> Parsec ByteString () Integer
-baseN n = many1 alphaNum >>= f 0
+baseN n = (many1 alphaNum >>= f 0) <?> "based number"
   where f acc [] = return acc
         f acc (x:xs)
           | dec   < 10 = if dec   < n then g dec   else err
           | alphu < 36 = if alphu < n then g alphu else err
           | alphl < 36 = if alphl < n then g alphl else err
-          | otherwise = err
+          | otherwise = unexpected "non-alphanumeric character"
           where dec = ord x - ord '0'
                 alphl = ord x - ord 'a' + 10
                 alphu = ord x - ord 'A' + 10
-                err = fail $ show x ++ " is larger than base " ++ show n ++ "."
+                err = fail $ show x ++ " is larger than base " ++ show n
                 g y = f ((+) acc . toInteger . (*) y . (^) n . length $ xs) xs
+                
+baseNFrac :: Int -> Parsec ByteString () Double
+baseNFrac n = char '.' *> ((flip ((.) . (. (10.0 ^)) . (/)) . subtract)
+  <$> (sourceColumn <$> getPosition)
+  <*> (fromInteger  <$> baseN n)
+  <*> (sourceColumn <$> getPosition))

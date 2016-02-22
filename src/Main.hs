@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-import Felony
+import Silence
+
 import System.Environment
 import System.IO
 import Control.Exception.Base hiding (evaluate)
@@ -21,14 +22,14 @@ repl p = repl' p []
             Left (IOError _ _ _ msg _ _) -> putStrLn $ "IOError: " ++ msg
             Right str -> do
               -- TODO: catch errors & make prompt an error prompt
-              (res,env') <- evalExpressions env $ parseFelony str
+              (res,env') <- evalExpressions env $ parseSilence str
               print res
               repl' prompt env'
 
 data Cmd = Cmd (Maybe FilePath) (Maybe String) Bool String
 
 evalCmd :: Cmd -> IO ()
-evalCmd (Cmd Nothing (Just src) False _) = void $ evalExpressions' $ parseFelony $ B.pack src
+evalCmd (Cmd Nothing (Just src) False _) = void $ evalExpressions' $ parseSilence $ B.pack src
 evalCmd (Cmd (Just fp) Nothing False _) = do
   src <- readFile fp
   evalCmd $ Cmd Nothing (Just src) False ""
@@ -39,7 +40,7 @@ getCommandArgs :: [String] -> IO Cmd
 getCommandArgs = handleParseResult . execParserPure pprefs parser
   where
     pprefs = ParserPrefs "" False True True 80
-    parser = info (helper <*> parser') (fullDesc <> header "Felony Lisp")
+    parser = info (helper <*> parser') (fullDesc <> header "Silence Lisp")
     parser' = Cmd
       <$> (optional $ strOption $ opt "file" 'f' "FILEPATH" Nothing "source file to evaluate")
       <*> (optional $ strOption $ opt "evaluate" 'e' "CODE" Nothing "source code to evaluate")

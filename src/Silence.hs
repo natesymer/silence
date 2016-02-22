@@ -1,7 +1,7 @@
-module Felony
+module Silence
 (
-  module Felony.Expression,
-  module Felony.Syntax,
+  module Silence.Expression,
+  module Silence.Syntax,
   evalExpressions',
   evalExpressions
 )
@@ -16,10 +16,10 @@ where
 * quasiquoter
 * pattern matching
 -}
-  
-import Felony.Syntax
-import Felony.Expression
-import Felony.Primitives
+
+import Silence.Syntax
+import Silence.Expression
+import Silence.Primitives
 import Control.Monad.State.Strict
 
 -- |Evaluate a list of 'Expression's in a new environment.

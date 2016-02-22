@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Felony.Primitives
+module Silence.Primitives
 (
   primitives,
   primitiveConstants
 )
 where
   
-import Felony.Syntax
-import Felony.Expression
+import Silence.Syntax
+import Silence.Expression
 
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict
@@ -30,7 +30,7 @@ import qualified Data.ByteString.Char8 as B
 * get-env & put-env
 * improve lambda consistency:
   • @begin@ procedure to handle sequential evaluation
-  • @lambda@ is no longer of arity @-1@ (it's now @2@)
+  • @lambda@ is no longer of arity @-1@ (it's now @2@, a list of arg names and a body)
 -}
 
 primitiveConstants :: Scope
@@ -72,7 +72,7 @@ primitives = H.fromList [
   ("evaluate", Procedure True 1 evaluateE),
   ("if",Procedure False 3 ifE),
   ("quote",Procedure False 1 quoteE),
-  ("lambda",Procedure False (-1) lambdaE), -- TODO: rethink me (replace sequential behavior with @begin@?)
+  ("lambda",Procedure False (-1) lambdaE),
   ("define",Procedure False (-1) defineE),
   ("let",Procedure True 2 letE),
   ("let!",Procedure True 2 letBangE)
@@ -87,7 +87,7 @@ ifE _ = invalidForm "if"
 -- |Standard scheme-esque quote.
 quoteE :: PrimFunc
 quoteE [v] = return v
-quoteE _ = invalidForm "quote"  
+quoteE _ = invalidForm "quote"
 
 -- |Standard scheme-esque lambda.
 lambdaE :: PrimFunc
@@ -130,9 +130,6 @@ bindE [Atom k, v] = modify f >> return v
         f (x:xs) = x:f xs
 bindE _ = invalidForm "bind!"
 
--- evaluate (Cell (Atom "define") (Cell a (Cell car cdr))) =
---   evaluate (Cell (Atom "bind!") (Cell a (Cell (Cell (Atom "lambda") (Cell car cdr)) Null)))
---
 defineE :: PrimFunc
 defineE (k:xs) = evaluate k >>= f
   where
@@ -286,5 +283,5 @@ xorE _ = invalidForm "xor"
 
 evaluateE :: PrimFunc
 evaluateE [x] = maybe (invalidForm "evaluate") eval $ fromLispStr x
-  where eval = fmap last . mapM evaluate . parseFelony . B.pack
+  where eval = fmap last . mapM evaluate . parseSilence . B.pack
 evaluateE _ = invalidForm "evaluate"

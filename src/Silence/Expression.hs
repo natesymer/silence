@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, MagicHash #-}
-module Felony.Expression
+module Silence.Expression
 (
   Scope,
   PrimFunc,

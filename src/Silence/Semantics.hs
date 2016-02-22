@@ -1,8 +1,8 @@
 {-# LANGUAGE OverloadedStrings, TupleSections #-}
 
-module Felony.Semantics (evaluate) where
+module Silence.Semantics (evaluate) where
 
-import Felony.Expression
+import Silence.Expression
 
 import qualified Data.ByteString.Char8 as B
 import qualified Data.HashMap.Strict as H
@@ -20,14 +20,11 @@ b. Atoms are evaluated by looking their string value up in the environment.
 c. Values of all other "types" are not modified.
 -}
 evaluate :: Expression -> LispM Expression
-evaluate (Cell (Atom "define") (Cell a (Cell car cdr))) =
-  evaluate (Cell (Atom "bind!") (Cell a (Cell (Cell (Atom "lambda") (Cell car cdr)) Null)))
 evaluate (Cell x xs) = evaluate x >>= f
   where f p@(Procedure True _ _) = maybe err (((apply p) =<<) . mapM evaluate) (fromConsList xs)
         f p@(Procedure False _ _) = maybe err (apply p) (fromConsList xs)
         f _ = error "invalid expression: car not a procedure"
         err = error "invalid expression: cdr not a cons list"
-        -- TODO: negative arity is a minimum arity
         apply    (Procedure _ (-1) act) as  = act as
         apply    (Procedure _ 0 act) []     = act []
         apply    (Procedure _ 0 _) _        = error "procedure applied too many times"

@@ -1,3 +1,5 @@
+#!dist/build/silence/silence -f
+
 ; higher-order.fl
 ; written by Nathaniel Symer, 2.15.16
 ;
@@ -31,11 +33,8 @@
 
 ; capitalize a "character" (ASCII integer)
 (define 'to-upper (c)
-  (if (>= c 97)
-    (if (<= c 122)
-      (- c 32)
-      c)
-    c))
+  (if (&& (>= c 97) (<= c 122))
+    (- c 32) c))
     
 (define 'printables (str)
   (filter (< 31) str))
@@ -48,5 +47,6 @@
   (upcase "this is my f&*^ing pony, damnit!\n"))
   
 (print
-  ((. upcase printables) ; define pointfree function!
-    "a\0\0\0"))
+  ((. upcase printables) ; we can define pointfree functions!
+  "a\0\0\0"))
+(print "\n") ;;
