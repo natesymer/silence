@@ -26,7 +26,7 @@ parseSilence = either (error . show) id . parse code ""
 code :: Parsec ByteString () [Expression]
 code = shebang *> exprs
   where exprs = (many $ ignored *> expr <* ignored)
-        shebang = try (string "#!" *> skipLine) <?> "shebang"
+        shebang = optional (try $ string "#!" *> skipLine) <?> "shebang"
   
 -- |Parser for an expression.
 expr :: Parsec ByteString () Expression

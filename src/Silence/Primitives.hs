@@ -20,11 +20,6 @@ import qualified Data.ByteString.Char8 as B
 {- TODO
 * I/O (console, files)
 * import code (depends on I/O)
-* math ops:
-  -> trig (sin,tan,cos,asin,atan,acos)
-  -> division (%,quot,rem)
-  -> roots & exponentiation (nroot,^)
-  -> rounding (round,ceiling,floor)
 * higher-order operators: ($)
 * randomness
 * get-env & put-env
@@ -55,9 +50,24 @@ primitives = H.fromList [
   ("-", Procedure True 2 subE),
   ("*", Procedure True 2 mulE),
   ("/", Procedure True 2 divE),
+  ("^", Procedure True 2 expoE),
   ("&&", Procedure True 2 andE),
   ("||", Procedure True 2 orE),
   ("xor", Procedure True 2 xorE),
+  ("nroot", Procedure True 2 nrootE),
+  ("%", Procedure True 2 moduloE),
+  ("quot", Procedure True 2 quotE),
+  ("round", Procedure True 1 roundE),
+  ("ceil", Procedure True 1 ceilE),
+  ("floor", Procedure True 1 floorE),
+  ("sin", Procedure True 1 (trig "sin" sin)),
+  ("cos", Procedure True 1 (trig "cos" cos)),
+  ("tan", Procedure True 1 (trig "tan" tan)),
+  ("asin", Procedure True 1 (trig "asin" asin)),
+  ("acos", Procedure True 1 (trig "acos" acos)),
+  ("atan", Procedure True 1 (trig "atan" atan)),
+  ("to-int", Procedure True 1 toIntegerE),
+  ("to-real", Procedure True 1 toRealE),
   ("to-str", Procedure True 1 toStrE),
   ("display", Procedure True 1 displayE), -- print a value
   ("print", Procedure True 1 printE), -- print a string
@@ -238,32 +248,86 @@ eqlE [a,b]                  = return $ Bool $ a == b
 eqlE _                      = invalidForm "="
 
 gtE :: PrimFunc
-gtE  [Integer a, Integer b] = return $ Bool $ a > b
-gtE  [Real a, Integer b]    = return $ Bool $ a > (fromInteger b)
-gtE  [Integer a, Real b]    = return $ Bool $ (fromInteger a) > b
-gtE  [Real a, Real b]       = return $ Bool $ a > b
-gtE  _                      = invalidForm ">"
+gtE [Integer a, Integer b] = return $ Bool $ a > b
+gtE [Real a, Integer b]    = return $ Bool $ a > (fromInteger b)
+gtE [Integer a, Real b]    = return $ Bool $ (fromInteger a) > b
+gtE [Real a, Real b]       = return $ Bool $ a > b
+gtE _                      = invalidForm ">"
 
 gteE :: PrimFunc
-gteE  [Integer a, Integer b] = return $ Bool $ a >= b
-gteE  [Real a, Integer b]    = return $ Bool $ a >= (fromInteger b)
-gteE  [Integer a, Real b]    = return $ Bool $ (fromInteger a) >= b
-gteE  [Real a, Real b]       = return $ Bool $ a >= b
-gteE  _                      = invalidForm ">="
+gteE [Integer a, Integer b] = return $ Bool $ a >= b
+gteE [Real a, Integer b]    = return $ Bool $ a >= (fromInteger b)
+gteE [Integer a, Real b]    = return $ Bool $ (fromInteger a) >= b
+gteE [Real a, Real b]       = return $ Bool $ a >= b
+gteE _                      = invalidForm ">="
 
 ltE :: PrimFunc
-ltE  [Integer a, Integer b] = return $ Bool $ a < b
-ltE  [Real a, Integer b]    = return $ Bool $ a < (fromInteger b)
-ltE  [Integer a, Real b]    = return $ Bool $ (fromInteger a) < b
-ltE  [Real a, Real b]       = return $ Bool $ a < b
-ltE  _                      = invalidForm "<"
+ltE [Integer a, Integer b] = return $ Bool $ a < b
+ltE [Real a, Integer b]    = return $ Bool $ a < (fromInteger b)
+ltE [Integer a, Real b]    = return $ Bool $ (fromInteger a) < b
+ltE [Real a, Real b]       = return $ Bool $ a < b
+ltE _                      = invalidForm "<"
 
 lteE :: PrimFunc
-lteE  [Integer a, Integer b] = return $ Bool $ a <= b
-lteE  [Real a, Integer b]    = return $ Bool $ a <= (fromInteger b)
-lteE  [Integer a, Real b]    = return $ Bool $ (fromInteger a) <= b
-lteE  [Real a, Real b]       = return $ Bool $ a <= b
-lteE  _                      = invalidForm "<="
+lteE [Integer a, Integer b] = return $ Bool $ a <= b
+lteE [Real a, Integer b]    = return $ Bool $ a <= (fromInteger b)
+lteE [Integer a, Real b]    = return $ Bool $ (fromInteger a) <= b
+lteE [Real a, Real b]       = return $ Bool $ a <= b
+lteE _                      = invalidForm "<="
+
+expoE :: PrimFunc
+expoE [Integer a, Integer b] = return $ Integer $ a ^ b
+expoE [Real a, Integer b]    = return $ Real $ a ^ b
+expoE _                      = invalidForm "^"
+
+nrootE :: PrimFunc
+nrootE [Integer n, Integer x] = return $ Real $ xroot (fromInteger n) (fromInteger x)
+nrootE [Integer n, Real x]    = return $ Real $ xroot (fromInteger n) x
+nrootE [Real n, Integer x]    = return $ Real $ xroot n (fromInteger x)
+nrootE [Real n, Real x]       = return $ Real $ xroot n x
+nrootE _                      = invalidForm "nroot"
+    
+-- based on http://www.rohitab.com/discuss/topic/35165-nth-root-function/
+xroot :: Floating a => a -> a -> a
+xroot n x = f (16 :: Int) x
+  where
+    f 0 xn = xn
+    f d xn = f ((-) d 1)
+               ((-) xn ((/) ((-) ((**) xn n) x) ((*) ((**) xn ((-) n 1)) n)))
+
+quotE :: PrimFunc
+quotE [Integer a, Integer b] = return $ Integer $ quot a b
+quotE _                      = invalidForm "quot"
+
+moduloE :: PrimFunc
+moduloE [Integer a, Integer b] = return $ Integer $ rem a b
+moduloE _                      = invalidForm "%"
+
+roundE :: PrimFunc
+roundE [Real v] = return $ Integer $ round v
+roundE _        = invalidForm "round"
+
+ceilE :: PrimFunc
+ceilE [Real v]  = return $ Integer $ ceiling v
+ceilE _         = invalidForm "ceil"
+
+floorE :: PrimFunc
+floorE [Real v] = return $ Integer $ floor v
+floorE _        = invalidForm "floor"
+
+trig :: String -> (Double -> Double) -> PrimFunc
+trig _ f [Real v] = return $ Real $ f v
+trig name _ _     = invalidForm name
+
+toIntegerE :: PrimFunc
+toIntegerE [Real v]    = return $ Integer (truncate v)
+toIntegerE [Integer v] = return $ Integer v
+toIntegerE _           = invalidForm "to-int"
+
+toRealE :: PrimFunc
+toRealE [Integer v] = return $ Real (fromInteger v)
+toRealE [Real v]    = return $ Real v
+toRealE _           = invalidForm "to-real"
 
 toStrE :: PrimFunc
 toStrE [x] = return $ toLispStr x
