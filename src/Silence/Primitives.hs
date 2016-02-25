@@ -13,279 +13,303 @@ import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 
 import Data.Maybe
-import Data.Bits
 import qualified Data.HashMap.Strict as H
 import qualified Data.ByteString.Char8 as B
 
 {- TODO
-* I/O (console, files)
-* import code (depends on I/O)
+* Real world features
+  * randomness
+  * file descrptors
+    * files
+    * consoles
+    * sockets (allows for networking!)
+  * import code (depends on file descriptors)
+  * concurrency
+  * system programming
+  * c interface
 * higher-order operators: ($)
-* randomness
 * get-env & put-env
-* improve lambda consistency:
-  • @begin@ procedure to handle sequential evaluation
-  • @lambda@ is no longer of arity @-1@ (it's now @2@, a list of arg names and a body)
+* number equality vs naive equality
 -}
 
 primitiveConstants :: Scope
 primitiveConstants = H.fromList []
 
--- |Primitive 'Procedure' 'Expression's that cannot be implemented in lisp.
--- They behave like any other @'Procedure'@ 'Expression', except they may inhibit
--- evaluation of arguments by 'evaluate'.
+-- |Primitive procedures that cannot be implemented in lisp. Most of them
+-- behave just like procedures defined in lisp, but are defined in Haskell.
+-- There are some procedures which inhibit parameter evaluation. These procedures
+-- (such as @lambda@) evaluate parameters internally according to their own logic.
 primitives :: Scope
 primitives = H.fromList [
-  ("not",Procedure True 1 notE),
-  ("cons",Procedure True 2 consE),
-  ("car",Procedure True 1 carE),
-  ("cdr",Procedure True 1 cdrE),
-  (".", Procedure True 2 composeE), -- function composition, result of 2nd proc gets passed to 1st proc.
-  ("=",Procedure True 2 eqlE),
-  (">",Procedure True 2 gtE),
-  (">=",Procedure True 2 gteE),
-  ("<",Procedure True 2 ltE),
-  ("<=",Procedure True 2 lteE),
-  ("+",Procedure True 2 addE),
-  ("-", Procedure True 2 subE),
-  ("*", Procedure True 2 mulE),
-  ("/", Procedure True 2 divE),
-  ("^", Procedure True 2 expoE),
-  ("&&", Procedure True 2 andE),
-  ("||", Procedure True 2 orE),
-  ("xor", Procedure True 2 xorE),
-  ("nroot", Procedure True 2 nrootE),
-  ("%", Procedure True 2 moduloE),
-  ("quot", Procedure True 2 quotE),
-  ("round", Procedure True 1 roundE),
-  ("ceil", Procedure True 1 ceilE),
-  ("floor", Procedure True 1 floorE),
-  ("sin", Procedure True 1 (trig "sin" sin)),
-  ("cos", Procedure True 1 (trig "cos" cos)),
-  ("tan", Procedure True 1 (trig "tan" tan)),
-  ("asin", Procedure True 1 (trig "asin" asin)),
-  ("acos", Procedure True 1 (trig "acos" acos)),
-  ("atan", Procedure True 1 (trig "atan" atan)),
-  ("to-int", Procedure True 1 toIntegerE),
-  ("to-real", Procedure True 1 toRealE),
-  ("to-str", Procedure True 1 toStrE),
-  ("display", Procedure True 1 displayE), -- print a value
-  ("print", Procedure True 1 printE), -- print a string
-  ("bind!", Procedure True 2 bindE), -- bind a value to an atom in the root/global env
-  ("integer?", Procedure True 1 isIntegerE),
-  ("real?", Procedure True 1 isRealE),
-  ("string?", Procedure True 1 isStringE),
-  ("atom?", Procedure True 1 isAtomE),
-  ("null?", Procedure True 1 isNullE),
-  ("list?", Procedure True 1 isListE),
-  ("pair?", Procedure True 1 isPairE),
-  ("evaluate", Procedure True 1 evaluateE),
-  ("if",Procedure False 3 ifE),
-  ("quote",Procedure False 1 quoteE),
-  ("lambda",Procedure False (-1) lambdaE),
-  ("define",Procedure False (-1) defineE),
-  ("let",Procedure True 2 letE),
-  ("let!",Procedure True 2 letBangE)
+  -- (">",  Procedure True 2 $ compE ">" (>)),
+--   (">=", Procedure True 2 $ compE ">=" (>=)),
+--   ("<",  Procedure True 2 $ compE "<" (<)),
+--   ("<=", Procedure True 2 $ compE "<=" (<=)),
+--   ("+", Procedure True 2 addE),
+--   ("-", Procedure True 2 subE),
+--   ("*", Procedure True 2 mulE),
+--   ("/", Procedure True 2 divE),
+--   ("^", Procedure True 2 expoE),
+--   ("%", Procedure True 2 moduloE),
+--   ("&&", Procedure True 2 andE),
+--   ("||", Procedure True 2 orE),
+--   ("nroot", Procedure True 2 nrootE),
+--   ("quot", Procedure True 2 quotE),
+--   ("round", Procedure True 1 roundE),
+--   ("ceil", Procedure True 1 ceilE),
+--   ("floor", Procedure True 1 floorE),
+--   ("sin", Procedure True 1 (trig "sin" sin)),
+--   ("cos", Procedure True 1 (trig "cos" cos)),
+--   ("tan", Procedure True 1 (trig "tan" tan)),
+--   ("asin", Procedure True 1 (trig "asin" asin)),
+--   ("acos", Procedure True 1 (trig "acos" acos)),
+--   ("atan", Procedure True 1 (trig "atan" atan)),
+--   ("to-int", Procedure True 1 toIntegerE),
+--   ("to-real", Procedure True 1 toRealE),
+--   ("to-str", Procedure True 1 toStrE),
+--   (".", Procedure True 2 composeE), -- function composition, result of 2nd proc gets passed to 1st proc.
+--   ("=", Procedure True 2 eqlE),
+--   ("cons", Procedure True 2 consE),
+--   ("car", Procedure True 1 carE),
+--   ("cdr", Procedure True 1 cdrE),
+--   ("print", Procedure True 1 printE), -- print a string
+--   ("integer?", Procedure True 1 isIntegerE),
+--   ("real?", Procedure True 1 isRealE),
+--   ("string?", Procedure True 1 isStringE),
+--   ("atom?", Procedure True 1 isAtomE),
+--   ("null?", Procedure True 1 isNullE),
+--   ("list?", Procedure True 1 isListE),
+--   ("pair?", Procedure True 1 isPairE),
+--   ("read", Procedure True 1 readE), -- parse a string of code
+--   ("let", Procedure True 2 letE),
+--   ("let!", Procedure True 2 letBangE),
+--   ("begin", Procedure True (-1) beginE), -- function sequencing
+--   ("if", Procedure False 3 ifE),
+--   ("quote", Procedure False 1 quoteE),
+--   ("lambda", Procedure False 2 lambdaE),
+--   ("func", Procedure False 3 funcE)
+  mkProc ">" True 2 $ compE (>),
+  mkProc ">=" True 2 $ compE (>=),
+  mkProc "<" True 2 $ compE (<),
+  mkProc "<=" True 2 $ compE (<=),
+  mkProc "+" True 2 addE,
+  mkProc "-" True 2 subE,
+  mkProc "*" True 2 mulE,
+  mkProc "/" True 2 divE,
+  mkProc "^" True 2 expoE,
+  mkProc "%" True 2 moduloE,
+  mkProc "&&" True 2 andE,
+  mkProc "||" True 2 orE,
+  mkProc "nroot" True 2 nrootE,
+  mkProc "quot" True 2 quotE,
+  mkProc "round" True 1 roundE,
+  mkProc "ceil" True 1 ceilE,
+  mkProc "floor" True 1 floorE,
+  mkProc "sin" True 1 $ trig sin,
+  mkProc "cos" True 1 $ trig cos,
+  mkProc "tan" True 1 $ trig tan,
+  mkProc "asin" True 1 $ trig asin,
+  mkProc "acos" True 1 $ trig acos,
+  mkProc "atan" True 1 $ trig atan,
+  mkProc "to-int" True 1 toIntegerE,
+  mkProc "to-real" True 1 toRealE,
+  mkProc "to-str" True 1 toStrE,
+  mkProc "." True 2 composeE, -- function composition, result of 2nd proc gets passed to 1st proc.
+  mkProc "=" True 2 eqlE,
+  mkProc "cons" True 2 consE,
+  mkProc "car" True 1 carE,
+  mkProc "cdr" True 1 cdrE,
+  mkProc "print" True 1 printE, -- print a string
+  mkProc "integer?" True 1 isIntegerE,
+  mkProc "real?" True 1 isRealE,
+  mkProc "string?" True 1 isStringE,
+  mkProc "atom?" True 1 isAtomE,
+  mkProc "null?" True 1 isNullE,
+  mkProc "list?" True 1 isListE,
+  mkProc "pair?" True 1 isPairE,
+  mkProc "read" True 1 readE, -- parse a string of code
+  mkProc "let" True 2 letE,
+  mkProc "let!" True 2 letBangE,
+  mkProc "begin" True (-1) beginE, -- function sequencing
+  mkProc "if" False 3 ifE,
+  mkProc "quote" False 1 quoteE,
+  mkProc "lambda" False 2 lambdaE,
+  mkProc "func" False 3 funcE
   ]
+  
+mkProc :: B.ByteString -> Bool -> Int -> (String -> PrimFunc) -> (B.ByteString, Expression)
+mkProc name eval arity body = (name, Procedure eval arity $ body $ B.unpack name)
 
-ifE :: PrimFunc
-ifE [x,t,f] = evaluate x >>= fn
-  where fn (Bool b) = evaluate (if b then t else f)
-        fn _ = invalidForm "if"
-ifE _ = invalidForm "if"
+ifE :: String -> PrimFunc
+ifE _ [x,t,f] = evaluate x >>= fn
+  where fn (Bool False) = evaluate f
+        fn _ = evaluate t
+ifE n _ = invalidForm n
 
 -- |Standard scheme-esque quote.
-quoteE :: PrimFunc
-quoteE [v] = return v
-quoteE _ = invalidForm "quote"
+quoteE :: String -> PrimFunc
+quoteE _ [v] = return v
+quoteE n _ = invalidForm n
 
--- |Standard scheme-esque lambda.
-lambdaE :: PrimFunc
-lambdaE (_:[]) = invalidForm "lambda: cannot create a body-less lambda"
-lambdaE (car:cdr) = maybe (invalidForm "lambda") return lambda
-  where lambda = mkLambda <$> (fromExpr atom car) <*> (Just cdr)
+-- |Takes:
+-- args -> list of atoms to which arguments will be bound
+-- body -> a *single* expression that serves as the procedure's body.
+-- Returns: function with arity @-1@ that evaluates args given key=val.
+-- example: @(lambda (a b c) (+ a (+ b c)))@ returns a procedure
+-- that adds three numbers.
+lambdaE :: String -> PrimFunc
+lambdaE n [args,body] = maybe argErr (return . lambda) (fromExpr atom args)
+  where argErr = invalidForm $ n ++ ": invalid argument names"
         atom (Atom a) = Just a
         atom _        = Nothing
-lambdaE _ = invalidForm "lambda"
+        lambda xs = Procedure True (length xs) $ \as ->
+          modify (push as) *> evaluate body <* modify tail
+          where push = (:) . H.fromList . zip xs
+lambdaE n _ = invalidForm n
 
 -- |Takes:
 -- key -> what to bind the variable to
 -- val -> value to bind
 -- Returns: function with arity @-1@ that evaluates args given key=val.
 -- example: @((let 'a 1) (+ 1 a))@ returns @2@
-letE :: PrimFunc
-letE [k@(Atom _),v] =
+letE :: String -> PrimFunc
+letE n [k@(Atom _),v] =
   return $ Procedure False (-1) $ \args -> do
-    l <- lambdaE ((Cell k Null):args)
+    l <- lambdaE n [Cell k Null, Cell (Atom "begin") (toConsList args)]
     evaluate (Cell l (Cell v Null))
-letE [_,_] = invalidForm "let: first argument must be an atom"
-letE _ = invalidForm "let"
+letE n _ = invalidForm n
 
 -- |Takes:
 -- key -> what to bind the variable to
 -- val -> value to bind
 -- Does: Assigns val to key in the current environment scope.
-letBangE :: PrimFunc
-letBangE [Atom k,v] = modify add >> return v
+letBangE :: String -> PrimFunc
+letBangE _ [Atom k,v] = modify add >> return v
   where add [] = error "empty stack"
         add (e:es) = (H.insert k v e):es
-letBangE [_,_] = invalidForm "let!: first argument must be an atom"
-letBangE _ = invalidForm "let"
+letBangE n _ = invalidForm n
 
--- |like letE, except for global (root) env.
-bindE :: PrimFunc
-bindE [Atom k, v] = modify f >> return v
-  where f [] = error "empty stack"
-        f [x] = [H.insert k v x]
-        f (x:xs) = x:f xs
-bindE _ = invalidForm "bind!"
-
-defineE :: PrimFunc
-defineE (k:xs) = evaluate k >>= f
+funcE :: String -> PrimFunc
+funcE n (k:xs) = evaluate k >>= f
   where
-    f k'@(Atom _) = lambdaE xs >>= bindE . (:) k' . pure
-    f _ = invalidForm "define: procedure name must be an atom"
-defineE _ = invalidForm "define"
+    f k'@(Atom _) = lambdaE n xs >>= letBangE n . (:) k' . pure
+    f _ = invalidForm $ n ++ ": function name must be an atom"
+funcE n _ = invalidForm n
 
 -- |Compose two functions of arbitrary arities. If @barity@ is > 1,
 -- this will return a procedure. @((. b a)<args>)@ = @(b (a <args>))@
-composeE :: PrimFunc
-composeE [Procedure _ barity b, Procedure eargs aarity a]
+composeE :: String -> PrimFunc
+composeE _ [Procedure _ barity b, Procedure eargs aarity a]
   | barity < 2 = return $ Procedure eargs aarity ((b . return =<<) . a)
   | otherwise = return $ Procedure eargs aarity ((apply procb . pure =<<) . a)
     where procb = Procedure False barity b 
-composeE _ = invalidForm "."
+composeE n _ = invalidForm n
 
-notE :: PrimFunc
-notE [Bool b] = return $ Bool $ not b
-notE _           = invalidForm "not"
+beginE :: String -> PrimFunc
+beginE = const $ return . last . (:) Null
 
-consE :: PrimFunc
-consE [a,b] = return $ Cell a b
-consE _     = invalidForm "cons"
+consE :: String -> PrimFunc
+consE _ [a,b] = return $ Cell a b
+consE n _     = invalidForm n
 
-carE :: PrimFunc
-carE [Cell v _] = return v
-carE _          = invalidForm "car"
+carE :: String -> PrimFunc
+carE _ [Cell v _] = return v
+carE n _          = invalidForm n
 
-cdrE :: PrimFunc
-cdrE [Cell _ v] = return v
-cdrE _          = invalidForm "cdr"
+cdrE :: String -> PrimFunc
+cdrE _ [Cell _ v] = return v
+cdrE n _          = invalidForm n
 
-displayE :: PrimFunc
-displayE = (>> return Null) . mapM_ (liftIO . print)
+printE :: String -> PrimFunc
+printE n [x] = maybe (invalidForm n) (liftIO . putStr) (fromLispStr x) >> return Null
+printE n _   = invalidForm n
 
-printE :: PrimFunc
-printE [x] = maybe (invalidForm "print") (liftIO . putStr) (fromLispStr x) >> return Null
-printE _   = invalidForm "print"
+isIntegerE :: String -> PrimFunc
+isIntegerE _ [Integer _] = return $ Bool True
+isIntegerE _ [_]         = return $ Bool False
+isIntegerE n _           = invalidForm n
 
-isIntegerE :: PrimFunc
-isIntegerE [Integer _] = return $ Bool True
-isIntegerE [_]         = return $ Bool False
-isIntegerE _           = invalidForm "integer?"
+isRealE :: String -> PrimFunc
+isRealE _ [Real _] = return $ Bool True
+isRealE _ [_]      = return $ Bool False
+isRealE n _        = invalidForm n
 
-isRealE :: PrimFunc
-isRealE [Real _] = return $ Bool True
-isRealE [_]      = return $ Bool False
-isRealE _        = invalidForm "real?"
-
-isStringE :: PrimFunc
-isStringE [xs] = return $ Bool $ isJust $ fromExpr integer xs
+isStringE :: String -> PrimFunc
+isStringE _ [xs] = return $ Bool $ isJust $ fromExpr integer xs
   where integer (Integer x) = Just x
         integer _           = Nothing
-isStringE _    = invalidForm "string?"
+isStringE n _    = invalidForm n
 
-isAtomE :: PrimFunc
-isAtomE [Atom _] = return $ Bool True
-isAtomE [_]      = return $ Bool False
-isAtomE _        = invalidForm "atom?"
+isAtomE :: String -> PrimFunc
+isAtomE _ [Atom _] = return $ Bool True
+isAtomE _ [_]      = return $ Bool False
+isAtomE n _        = invalidForm n
 
-isNullE :: PrimFunc
-isNullE [Null] = return $ Bool True
-isNullE [_]    = return $ Bool False
-isNullE _      = invalidForm "null?"
+isNullE :: String -> PrimFunc
+isNullE _ [Null] = return $ Bool True
+isNullE _ [_]    = return $ Bool False
+isNullE n _      = invalidForm n
 
-isListE :: PrimFunc
-isListE [Cell _ xs] = isListE [xs]
-isListE [Null]      = return $ Bool True
-isListE _           = invalidForm "list?"
+isListE :: String -> PrimFunc
+isListE n [Cell _ xs] = isListE n [xs]
+isListE _ [Null]      = return $ Bool True
+isListE n _           = invalidForm n
 
-isPairE :: PrimFunc
-isPairE [Cell _ _] = return $ Bool True
-isPairE [_]        = return $ Bool False
-isPairE _          = invalidForm "pair?"
+isPairE :: String -> PrimFunc
+isPairE _ [Cell _ _] = return $ Bool True
+isPairE _ [_]        = return $ Bool False
+isPairE n _          = invalidForm n
 
-addE :: PrimFunc
-addE [Integer a, Integer b] = return $ Integer $ a + b
-addE [Integer a, Real b]    = return $ Real $ (fromInteger a) + b
-addE [Real a, Integer b]    = return $ Real $ a + (fromInteger b)
-addE [Real a, Real b]       = return $ Real $ a + b
-addE _                      = invalidForm "+"
+eqlE :: String -> PrimFunc
+eqlE _ [a,b]                  = return $ Bool $ a == b
+eqlE n _                      = invalidForm n
 
-subE :: PrimFunc
-subE [Integer a, Integer b] = return $ Integer $ a - b
-subE [Integer a, Real b]    = return $ Real $ (fromInteger a) - b
-subE [Real a, Integer b]    = return $ Real $ a - (fromInteger b)
-subE [Real a, Real b]       = return $ Real $ a - b
-subE _                      = invalidForm "-"
+compE :: (Ordering -> Ordering -> Bool) -> String -> PrimFunc
+compE p _ [Integer a, Integer b] = return $ Bool $ p (compare a b)               EQ
+compE p _ [Real a, Integer b]    = return $ Bool $ p (compare a (fromInteger b)) EQ
+compE p _ [Integer a, Real b]    = return $ Bool $ p (compare (fromInteger a) b) EQ
+compE p _ [Real a, Real b]       = return $ Bool $ p (compare a b)               EQ
+compE _ n _ = invalidForm n
 
-mulE :: PrimFunc
-mulE [Integer a, Integer b] = return $ Integer $ a * b
-mulE [Integer a, Real b]    = return $ Real $ (fromInteger a) * b
-mulE [Real a, Integer b]    = return $ Real $ a * (fromInteger b)
-mulE [Real a, Real b]       = return $ Real $ a * b
-mulE _                      = invalidForm "*"
+addE :: String -> PrimFunc
+addE _ [Integer a, Integer b] = return $ Integer $ a + b
+addE _ [Integer a, Real b]    = return $ Real $ (fromInteger a) + b
+addE _ [Real a, Integer b]    = return $ Real $ a + (fromInteger b)
+addE _ [Real a, Real b]       = return $ Real $ a + b
+addE n _                      = invalidForm n
 
-divE :: PrimFunc
-divE [Integer a, Integer b] = return $ Real $ (fromInteger a) / (fromInteger b)
-divE [Integer a, Real b]    = return $ Real $ (fromInteger a) / b
-divE [Real a, Integer b]    = return $ Real $ a / (fromInteger b)
-divE [Real a, Real b]       = return $ Real $ a / b
-divE _                      = invalidForm "/"
+subE :: String -> PrimFunc
+subE _ [Integer a, Integer b] = return $ Integer $ a - b
+subE _ [Integer a, Real b]    = return $ Real $ (fromInteger a) - b
+subE _ [Real a, Integer b]    = return $ Real $ a - (fromInteger b)
+subE _ [Real a, Real b]       = return $ Real $ a - b
+subE n _                      = invalidForm n
 
-eqlE :: PrimFunc
-eqlE [a,b]                  = return $ Bool $ a == b
-eqlE _                      = invalidForm "="
+mulE :: String -> PrimFunc
+mulE _ [Integer a, Integer b] = return $ Integer $ a * b
+mulE _ [Integer a, Real b]    = return $ Real $ (fromInteger a) * b
+mulE _ [Real a, Integer b]    = return $ Real $ a * (fromInteger b)
+mulE _ [Real a, Real b]       = return $ Real $ a * b
+mulE n _                      = invalidForm n
 
-gtE :: PrimFunc
-gtE [Integer a, Integer b] = return $ Bool $ a > b
-gtE [Real a, Integer b]    = return $ Bool $ a > (fromInteger b)
-gtE [Integer a, Real b]    = return $ Bool $ (fromInteger a) > b
-gtE [Real a, Real b]       = return $ Bool $ a > b
-gtE _                      = invalidForm ">"
+divE :: String -> PrimFunc
+divE _ [Integer a, Integer b] = return $ Real $ (fromInteger a) / (fromInteger b)
+divE _ [Integer a, Real b]    = return $ Real $ (fromInteger a) / b
+divE _ [Real a, Integer b]    = return $ Real $ a / (fromInteger b)
+divE _ [Real a, Real b]       = return $ Real $ a / b
+divE n _                      = invalidForm n
 
-gteE :: PrimFunc
-gteE [Integer a, Integer b] = return $ Bool $ a >= b
-gteE [Real a, Integer b]    = return $ Bool $ a >= (fromInteger b)
-gteE [Integer a, Real b]    = return $ Bool $ (fromInteger a) >= b
-gteE [Real a, Real b]       = return $ Bool $ a >= b
-gteE _                      = invalidForm ">="
+expoE :: String -> PrimFunc
+expoE _ [Integer a, Integer b] = return $ Integer $ a ^ b
+expoE _ [Real a, Integer b]    = return $ Real $ a ^ b
+expoE n _                      = invalidForm n
 
-ltE :: PrimFunc
-ltE [Integer a, Integer b] = return $ Bool $ a < b
-ltE [Real a, Integer b]    = return $ Bool $ a < (fromInteger b)
-ltE [Integer a, Real b]    = return $ Bool $ (fromInteger a) < b
-ltE [Real a, Real b]       = return $ Bool $ a < b
-ltE _                      = invalidForm "<"
-
-lteE :: PrimFunc
-lteE [Integer a, Integer b] = return $ Bool $ a <= b
-lteE [Real a, Integer b]    = return $ Bool $ a <= (fromInteger b)
-lteE [Integer a, Real b]    = return $ Bool $ (fromInteger a) <= b
-lteE [Real a, Real b]       = return $ Bool $ a <= b
-lteE _                      = invalidForm "<="
-
-expoE :: PrimFunc
-expoE [Integer a, Integer b] = return $ Integer $ a ^ b
-expoE [Real a, Integer b]    = return $ Real $ a ^ b
-expoE _                      = invalidForm "^"
-
-nrootE :: PrimFunc
-nrootE [Integer n, Integer x] = return $ Real $ xroot (fromInteger n) (fromInteger x)
-nrootE [Integer n, Real x]    = return $ Real $ xroot (fromInteger n) x
-nrootE [Real n, Integer x]    = return $ Real $ xroot n (fromInteger x)
-nrootE [Real n, Real x]       = return $ Real $ xroot n x
-nrootE _                      = invalidForm "nroot"
+nrootE :: String -> PrimFunc
+nrootE _ [Integer n, Integer x] = return $ Real $ xroot (fromInteger n) (fromInteger x)
+nrootE _ [Integer n, Real x]    = return $ Real $ xroot (fromInteger n) x
+nrootE _ [Real n, Integer x]    = return $ Real $ xroot n (fromInteger x)
+nrootE _ [Real n, Real x]       = return $ Real $ xroot n x
+nrootE n _                      = invalidForm n
     
 -- based on http://www.rohitab.com/discuss/topic/35165-nth-root-function/
 xroot :: Floating a => a -> a -> a
@@ -295,57 +319,53 @@ xroot n x = f (16 :: Int) x
     f d xn = f ((-) d 1)
                ((-) xn ((/) ((-) ((**) xn n) x) ((*) ((**) xn ((-) n 1)) n)))
 
-quotE :: PrimFunc
-quotE [Integer a, Integer b] = return $ Integer $ quot a b
-quotE _                      = invalidForm "quot"
+quotE :: String -> PrimFunc
+quotE _ [Integer a, Integer b] = return $ Integer $ quot a b
+quotE n _                      = invalidForm n
 
-moduloE :: PrimFunc
-moduloE [Integer a, Integer b] = return $ Integer $ rem a b
-moduloE _                      = invalidForm "%"
+moduloE :: String -> PrimFunc
+moduloE _ [Integer a, Integer b] = return $ Integer $ rem a b
+moduloE n _                      = invalidForm n
 
-roundE :: PrimFunc
-roundE [Real v] = return $ Integer $ round v
-roundE _        = invalidForm "round"
+roundE :: String -> PrimFunc
+roundE _ [Real v] = return $ Integer $ round v
+roundE n _        = invalidForm n
 
-ceilE :: PrimFunc
-ceilE [Real v]  = return $ Integer $ ceiling v
-ceilE _         = invalidForm "ceil"
+ceilE :: String -> PrimFunc
+ceilE _ [Real v]  = return $ Integer $ ceiling v
+ceilE n _         = invalidForm n
 
-floorE :: PrimFunc
-floorE [Real v] = return $ Integer $ floor v
-floorE _        = invalidForm "floor"
+floorE :: String -> PrimFunc
+floorE _ [Real v] = return $ Integer $ floor v
+floorE n _        = invalidForm n
 
-trig :: String -> (Double -> Double) -> PrimFunc
-trig _ f [Real v] = return $ Real $ f v
-trig name _ _     = invalidForm name
+trig :: (Double -> Double) -> String -> PrimFunc
+trig f _ [Real v] = return $ Real $ f v
+trig _ n _        = invalidForm n
 
-toIntegerE :: PrimFunc
-toIntegerE [Real v]    = return $ Integer (truncate v)
-toIntegerE [Integer v] = return $ Integer v
-toIntegerE _           = invalidForm "to-int"
+toIntegerE :: String -> PrimFunc
+toIntegerE _ [Real v]    = return $ Integer $ truncate v
+toIntegerE _ [Integer v] = return $ Integer v
+toIntegerE n _           = invalidForm n
 
-toRealE :: PrimFunc
-toRealE [Integer v] = return $ Real (fromInteger v)
-toRealE [Real v]    = return $ Real v
-toRealE _           = invalidForm "to-real"
+toRealE :: String -> PrimFunc
+toRealE _ [Integer v] = return $ Real $ fromInteger v
+toRealE _ [Real v]    = return $ Real v
+toRealE n _           = invalidForm n
 
-toStrE :: PrimFunc
-toStrE [x] = return $ toLispStr x
-toStrE _ = invalidForm "to-str"
+toStrE :: String -> PrimFunc
+toStrE _ [x] = return $ toLispStr x
+toStrE n _ = invalidForm n
 
-andE :: PrimFunc
-andE [Bool a,Bool b] = return $ Bool (a && b)
-andE _ = invalidForm "&&"
+andE :: String -> PrimFunc
+andE _ [Bool a,Bool b] = return $ Bool (a && b)
+andE n _ = invalidForm n
 
-orE :: PrimFunc
-orE [Bool a,Bool b] = return $ Bool (a || b)
-orE _ = invalidForm "||"
+orE :: String -> PrimFunc
+orE _ [Bool a,Bool b] = return $ Bool (a || b)
+orE n _ = invalidForm n
 
-xorE :: PrimFunc
-xorE [Bool a,Bool b] = return $ Bool $ xor a b
-xorE _ = invalidForm "xor"
-
-evaluateE :: PrimFunc
-evaluateE [x] = maybe (invalidForm "evaluate") eval $ fromLispStr x
-  where eval = fmap last . mapM evaluate . parseSilence . B.pack
-evaluateE _ = invalidForm "evaluate"
+readE :: String -> PrimFunc
+readE _ [x] = maybe (invalidForm "read") f $ fromLispStr x
+  where f = return . parseSilence . B.pack
+readE n _ = invalidForm n

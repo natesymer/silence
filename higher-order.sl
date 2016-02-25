@@ -6,15 +6,18 @@
 ; This is an example of some of the Haskell-esque
 ; programming you can do with this language!
 
+; "show" function
+(func 'display (a) (begin (print (to-str a)) (print "\n") ))
+
 ; map implementation (not tail recursive!)
-(define 'map (f xs)
+(func 'map (f xs)
   (if (null? xs)
     '()
     (cons
       (f (car xs))
       (map f (cdr xs)))))
       
-(define 'filter (f xs)
+(func 'filter (f xs)
   (if (null? xs)
     '()
     (if (f (car xs))
@@ -32,16 +35,14 @@
 ;
 
 ; capitalize a "character" (ASCII integer)
-(define 'to-upper (c)
+(func 'to-upper (c)
   (if (&& (>= c 97) (<= c 122))
     (- c 32) c))
     
-(define 'printables (str)
+(func 'printables (str)
   (filter (< 31) str))
 
-(bind!
-  'upcase
-  (map to-upper))
+(let! 'upcase (map to-upper))
 
 (print
   (upcase "this is my f&*^ing pony, damnit!\n"))
@@ -49,4 +50,4 @@
 (print
   ((. upcase printables) ; we can define pointfree functions!
   "a\0\0\0"))
-(print "\n") ;;
+(print "\n") ; print a newline

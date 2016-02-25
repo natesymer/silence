@@ -18,9 +18,10 @@ import qualified Data.ByteString.Char8 as B
 skipLine :: Parsec ByteString () ()
 skipLine = void newline <|> void crlf <|> eof <|> (anyToken *> skipLine)
 
--- |Parse code into expressions
-parseSilence :: ByteString -> [Expression]
-parseSilence = either (error . show) id . parse code ""
+-- |Parse code an evaluateable expression.
+parseSilence :: ByteString -> Expression
+parseSilence = wrap . either (error . show) id . parse code ""
+  where wrap = Cell (Atom "begin") . toConsList
 
 -- |Parser for code (list of expressions)
 code :: Parsec ByteString () [Expression]

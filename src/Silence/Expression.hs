@@ -9,14 +9,15 @@ module Silence.Expression
   evaluate,
   apply,
   -- * 'Expression' Transforms
-  mkLambda,
   toLispStr,
   fromLispStr,
   fromConsList,
+  toConsList,
   fromExpr,
   envToAssoc,
   -- * Misc
-  invalidForm
+  invalidForm,
+  showExpr
 )
 where
   
@@ -32,6 +33,7 @@ import Data.Char
 import GHC.Integer.GMP.Internals
 import GHC.Types
 import GHC.Prim
+-- import System.Posix.IO
 
 -- |Monad in which Lisp expressions are evaluated
 newtype LispM a = LispM {
@@ -46,16 +48,14 @@ data Expression = Atom ByteString
                 | Integer Integer
                 | Real Double
                 | Bool Bool
+                -- | FD Fd
                 | Environment [Scope]
                 | Procedure
                     Bool -- @'True'@ if arguments should be evaluated in 'evaluate'
                     Int -- arity
                     PrimFunc -- state action
                 | Null
-                | Cell Expression Expression 
-
-instance Show Expression where
-  show = B.unpack . showExpr
+                | Cell Expression Expression
 
 instance Eq Expression where
   (Atom a) == (Atom b) = a == b
@@ -97,7 +97,7 @@ toLispStr :: Expression -> Expression
 toLispStr = toIntList . showExpr
   where toIntList = B.foldr (Cell . Integer . fastOrdInteger) Null
         fastOrdInteger (C# c) = S# (ord# c)
-   
+
 -- |Turns a lisp string into a Haskell 'String'.     
 fromLispStr :: Expression -> Maybe String
 fromLispStr = fromExpr integer
@@ -114,6 +114,10 @@ fromConsList = f (Just id)
   where f acc Null = acc <*> Just []
         f acc (Cell x xs) = f (fmap (. (:) x) acc) xs
         f _ _ = Nothing
+    
+-- |Make a cons list out of a haskell list.    
+toConsList :: [Expression] -> Expression
+toConsList = foldr Cell Null
   
 -- |Coerce lisp cons list into a homogeneous haskell
 -- list of haskell values. For example: to turn a cons list
@@ -133,14 +137,6 @@ fromExpr f = (>>= (foldr f' (Just []))) . fromConsList
 -- |Specialized error message.
 invalidForm :: String -> LispM a
 invalidForm = error . (++) "invalid form: "
-
--- |Construct a lambda from bindings and bodies.
-mkLambda :: [ByteString] -- ^ bindings
-         -> [Expression] -- ^ bodies
-         -> Expression
-mkLambda xs bs = Procedure True (length xs) $ \as ->
-  modify (push as) *> (last <$> mapM evaluate bs) <* modify tail
-  where push = (:) . H.fromList . zip xs
         
 {-|Evaluate an 'Expression'.
 

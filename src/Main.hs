@@ -22,14 +22,14 @@ repl p = repl' p []
             Left (IOError _ _ _ msg _ _) -> putStrLn $ "IOError: " ++ msg
             Right str -> do
               -- TODO: catch errors & make prompt an error prompt
-              (res,env') <- evalExpressions env $ parseSilence str
-              print res
+              (res,env') <- evalExpression env $ parseSilence str
+              B.putStrLn $ showExpr res
               repl' prompt env'
 
 data Cmd = Cmd (Maybe FilePath) (Maybe String) Bool String
 
 evalCmd :: Cmd -> IO ()
-evalCmd (Cmd Nothing (Just src) False _) = void $ evalExpressions' $ parseSilence $ B.pack src
+evalCmd (Cmd Nothing (Just src) False _) = void $ evalExpression' $ parseSilence $ B.pack src
 evalCmd (Cmd (Just fp) Nothing False _) = do
   src <- readFile fp
   evalCmd $ Cmd Nothing (Just src) False ""
