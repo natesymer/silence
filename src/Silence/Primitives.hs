@@ -18,7 +18,6 @@ import qualified Data.HashMap.Strict as H
 import qualified Data.ByteString.Char8 as B
 
 {- TODO
-* Rewrite math to use Rational rather than Integer/Double
 * Real world features
   * randomness
   * file descrptors
@@ -54,8 +53,6 @@ primitives = H.fromList [
   mkProc "/" True 2 $ mathE (/),
   mkProc "^" True 2 expoE,
   mkProc "%" True 2 $ integralMathE rem,
-  mkProc "&&" True 2 andE,
-  mkProc "||" True 2 orE,
   mkProc "quot" True 2 $ integralMathE quot,
   mkProc "round" True 1 $ roundingMathE round,
   mkProc "ceil" True 1 $ roundingMathE ceiling,
@@ -84,32 +81,24 @@ primitives = H.fromList [
   mkProc "let!" True 2 letBangE,
   mkProc "let-parent!" True 2 letParentBangE,
   mkProc "if" False 3 ifE,
-  mkProc "quote" False 1 quoteE,
+  mkProc "quote" False 1 (const $ return . head), -- inhibit evaluation
   mkProc "lambda" False 2 $ lambdaE True, -- this one evaluates arguments
   mkProc "lambda!" False 2 $ lambdaE False, -- this one *doesn't* evaluate arguments
   mkProc "mk-lambda" True 2 $ lambdaE True, -- like lambda, but it's args are evaluated
   mkProc "mk-lambda!" True 2 $ lambdaE False, -- like lambda, but it's args are evaluated
-  mkProc "evaluate" False 1 evaluateE,
-  mkProc "import" True 1 importE,
-  mkProc "begin" True (-1) (const $ return . last)]
+  mkProc "evaluate" True 1 (const $ evaluate . head),
+  mkProc "import" True 1 importE, -- load a source code file and evaluate it
+  mkProc "begin" True (-1) (const $ return . last) -- sequential evaluation using language semantics
+  ]
 
 mkProc :: B.ByteString -> Bool -> Int -> (String -> PrimFunc) -> (B.ByteString, Expression)
 mkProc name eval arity body = (name, Procedure eval arity $ body $ B.unpack name)
-
-evaluateE :: String -> PrimFunc
-evaluateE _ [x] = evaluate x
-evaluateE n _ = invalidForm n
 
 ifE :: String -> PrimFunc
 ifE _ [x,t,f] = evaluate x >>= fn
   where fn (Bool False) = evaluate f
         fn _ = evaluate t
 ifE n _ = invalidForm n
-
--- |Standard scheme-esque quote.
-quoteE :: String -> PrimFunc
-quoteE _ [v] = return v
-quoteE n _ = invalidForm n
 
 -- |Takes:
 -- args -> list of atoms to which arguments will be bound
@@ -126,7 +115,7 @@ lambdaE evalArgs n [args,body] = maybe argErr (lambda body) (fromAtoms args)
         lambda bdy xs = do
           cap <- get -- capture env it was defined in
           return $ Procedure evalArgs (length xs) $ scoped bdy cap . H.fromList . zip xs
-        scoped bdy cap env = liftIO (putStrLn "scoping") *> modify' ((:) (mconcat $ env:cap)) *> evaluate bdy <* modify' tail
+        scoped bdy cap env = modify' ((:) (mconcat $ env:cap)) *> evaluate bdy <* modify' tail
 lambdaE _ n _ = invalidForm n
 
 -- |Takes:
@@ -209,16 +198,8 @@ isPairE _ [_]        = return $ Bool False
 isPairE n _          = invalidForm n
 
 eqlE :: String -> PrimFunc
-eqlE _ [a,b]                  = return $ Bool $ a == b
-eqlE n _                      = invalidForm n
-
-andE :: String -> PrimFunc
-andE _ [Bool a,Bool b] = return $ Bool (a && b)
-andE n _ = invalidForm n
-
-orE :: String -> PrimFunc
-orE _ [Bool a,Bool b] = return $ Bool (a || b)
-orE n _ = invalidForm n
+eqlE _ [a,b] = return $ Bool $ a == b
+eqlE n _     = invalidForm n
 
 readE :: String -> PrimFunc
 readE n [x] = maybe (invalidForm n) f $ fromLispStr x
@@ -264,4 +245,4 @@ expoE :: String -> PrimFunc
 expoE n [Number a,Number b] = case fromNumber b of
   Left b' -> return $ Number $ (^) a b'
   _ -> invalidForm n
-expoE n _                      = invalidForm n
+expoE n _ = invalidForm n

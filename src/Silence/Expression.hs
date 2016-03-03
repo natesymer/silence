@@ -42,13 +42,10 @@ newtype LispM a = LispM {
 
 type Scope = HashMap ByteString Expression
 type PrimFunc = [Expression] -> LispM Expression -- TODO: Make this a state action: [Expression] -> [Scope] -> IO (Expression,[Scope])
-          
 
 -- |A lisp expression.
 data Expression = Atom ByteString
                 | Number Rational
-                -- | Integer Integer
-                -- | Real Double
                 | Bool Bool
                 -- | FD Fd
                 | Environment [Scope]
@@ -65,10 +62,6 @@ instance Show Expression where
 instance Eq Expression where
   (Atom a) == (Atom b) = a == b
   (Number a) == (Number b) = a == b
-  -- (Real a) == (Real b) = a == b
-  -- (Integer a) == (Real b) = (fromInteger a) == b
-  -- (Real b) == (Integer a) = b == (fromInteger a)
-  -- (Integer a) == (Integer b) = a == b
   (Bool a) == (Bool b) = a == b
   Null == Null = True
   (Cell a as) == (Cell b bs) = a == b && as == bs
@@ -78,8 +71,6 @@ instance Eq Expression where
 showExpr :: Expression -> ByteString
 showExpr (Atom x) = x
 showExpr (Number x) = B.pack $ either show show $ fromNumber x
--- showExpr (Integer x) = B.pack $ show x -- TODO: better means of showing 'Integers's
--- showExpr (Real x) = B.pack $ show x -- TODO: better means of showing 'Double's (that doesn't use sci notation)
 showExpr Null = "()"
 showExpr (Bool True)  = "#t"
 showExpr (Bool False) = "#f"
