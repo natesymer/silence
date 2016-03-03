@@ -7,7 +7,7 @@
 (let! 'func
   (lambda! (name args body) 
     (let-parent!
-      (evaluate name) ;; name isn't evaluated for some reason (use haskell @const $ return . head@)
+      (evaluate name) ; TODO: avoid extra evaluate calls
       (mk-lambda args body))))
 
 ; TODO: let form for binding in a given scope

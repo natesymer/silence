@@ -82,6 +82,7 @@ primitives = H.fromList [
   mkProc "let-parent!" True 2 letParentBangE,
   mkProc "if" False 3 ifE,
   mkProc "quote" False 1 (const $ return . head), -- inhibit evaluation
+  mkProc "unquote" True 1 (const $ return . head), -- inverse of @quote@
   mkProc "lambda" False 2 $ lambdaE True, -- this one evaluates arguments
   mkProc "lambda!" False 2 $ lambdaE False, -- this one *doesn't* evaluate arguments
   mkProc "mk-lambda" True 2 $ lambdaE True, -- like lambda, but it's args are evaluated
