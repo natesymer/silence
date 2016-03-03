@@ -54,7 +54,7 @@ ebool = true <|> false <?> "bool"
 
 estring :: Parsec ByteString () Expression
 estring = wrap . toIntList <$> str <?> "string"
-  where toIntList = foldr Cell Null . map (Integer . fromIntegral . ord)
+  where toIntList = foldr Cell Null . map (Number . toRational . ord)
         wrap = Cell (Atom "quote") . flip Cell Null
         str = q *> many accepted <* q
         q = char '"'; bs = char (chr 92)
@@ -87,18 +87,18 @@ elist = char '(' *> list' id <* char ')' <?> "list"
 enumber :: Parsec ByteString () Expression
 enumber = choice [real,dec,nonBaseTen] <?> "number"
   where real = try $ mkReal
-          <$> (fromInteger <$> sign)
-          <*> (fromInteger <$> option 0 (baseN 10))
-          <*> baseNFrac 10
-        mkReal s a = Real . (*) s . (+) a
+          <$> (toRational <$> sign)
+          <*> (toRational <$> option 0 (baseN 10))
+          <*> (toRational <$> baseNFrac 10)
+        mkReal s a = Number . (*) s . (+) a
         sign = option 1 $ char '-' *> return (-1)
-        dec  = try $ Integer <$> ((*) <$> sign <*> baseN 10)
+        dec  = try $ Number . toRational <$> ((*) <$> sign <*> baseN 10)
         nonBaseTen = char '#' *> choice [
           char 'x' *> intN 16,
           char 'b' *> intN 2,
           char 'o' *> intN 8,
           baseN 10 <* char '|' >>= intN . fromInteger]
-        intN = fmap Integer . baseN
+        intN = fmap (Number . toRational) . baseN
           
 baseN :: Int -> Parsec ByteString () Integer
 baseN n = (many1 alphaNum >>= f 0) <?> "based number"

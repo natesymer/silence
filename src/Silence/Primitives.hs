@@ -13,7 +13,7 @@ import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 
 import Data.Maybe
-import Data.Ratio
+import Data.Either
 import qualified Data.HashMap.Strict as H
 import qualified Data.ByteString.Char8 as B
 
@@ -53,22 +53,21 @@ primitives = H.fromList [
   mkProc "*" True 2 $ mathE (*),
   mkProc "/" True 2 $ mathE (/),
   mkProc "^" True 2 expoE,
-  mkProc "%" True 2 $ integralMathE rem,-- moduloE,
+  mkProc "%" True 2 $ integralMathE rem,
   mkProc "&&" True 2 andE,
   mkProc "||" True 2 orE,
-  mkProc "quot" True 2 $ integralMathE quot,-- quotE,
-  mkProc "round" True 1 $ roundingMathE round,--roundE,
-  mkProc "ceil" True 1 $ roundingMathE ceiling, -- ceilE,
-  mkProc "floor" True 1 $ roundingMathE floor, -- floorE,
+  mkProc "quot" True 2 $ integralMathE quot,
+  mkProc "round" True 1 $ roundingMathE round,
+  mkProc "ceil" True 1 $ roundingMathE ceiling,
+  mkProc "floor" True 1 $ roundingMathE floor,
   mkProc "sin" True 1 $ realMathUnaryE sin,
   mkProc "cos" True 1 $ realMathUnaryE cos,
   mkProc "tan" True 1 $ realMathUnaryE tan,
   mkProc "asin" True 1 $ realMathUnaryE asin,
   mkProc "acos" True 1 $ realMathUnaryE acos,
   mkProc "atan" True 1 $ realMathUnaryE atan,
-  mkProc "to-int" True 1 toIntegerE,
-  mkProc "to-real" True 1 toRealE,
   mkProc "to-str" True 1 toStrE,
+  mkProc "to-atom" True 1 toAtomE,
   mkProc "cons" True 2 consE,
   mkProc "car" True 1 carE,
   mkProc "cdr" True 1 cdrE,
@@ -178,19 +177,15 @@ isProcE _ [_]               = return $ Bool False
 isProcE n _                 = invalidForm n
 
 isIntegerE :: String -> PrimFunc
-isIntegerE _ [Integer _] = return $ Bool True
-isIntegerE _ [_]         = return $ Bool False
+isIntegerE _ [Number b] = return $ Bool $ isLeft $ fromNumber b
 isIntegerE n _           = invalidForm n
 
 isRealE :: String -> PrimFunc
-isRealE _ [Real _] = return $ Bool True
-isRealE _ [_]      = return $ Bool False
-isRealE n _        = invalidForm n
+isRealE _ [Number b] = return $ Bool $ isRight $ fromNumber b
+isRealE n _          = invalidForm n
 
 isStringE :: String -> PrimFunc
-isStringE _ [xs] = return $ Bool $ isJust $ fromExpr integer xs
-  where integer (Integer x) = Just x
-        integer _           = Nothing
+isStringE _ [xs] = return $ Bool $ isJust $ fromLispStr xs
 isStringE n _    = invalidForm n
 
 isAtomE :: String -> PrimFunc
@@ -239,47 +234,34 @@ toStrE :: String -> PrimFunc
 toStrE _ [x] = return $ toLispStr x
 toStrE n _ = invalidForm n
 
-toIntegerE :: String -> PrimFunc
-toIntegerE _ [Real v]    = return $ Integer $ truncate v
-toIntegerE _ [Integer v] = return $ Integer v
-toIntegerE n _           = invalidForm n
+toAtomE :: String -> PrimFunc
+toAtomE _ [x] = return $ Atom $ showExpr x
+toAtomE n _ = invalidForm n
 
-toRealE :: String -> PrimFunc
-toRealE _ [Integer v] = return $ Real $ fromInteger v
-toRealE _ [Real v]    = return $ Real v
-toRealE n _           = invalidForm n
-
-compE :: (Ordering -> Ordering -> Bool) -> String -> PrimFunc
-compE p _ [Integer a, Integer b] = return $ Bool $ p (compare a b)               EQ
-compE p _ [Real a, Integer b]    = return $ Bool $ p (compare a (fromInteger b)) EQ
-compE p _ [Integer a, Real b]    = return $ Bool $ p (compare (fromInteger a) b) EQ
-compE p _ [Real a, Real b]       = return $ Bool $ p (compare a b)               EQ
+compE :: (Rational -> Rational -> Bool) -> String -> PrimFunc
+compE p _ [Number a, Number b] = return $ Bool $ p a b
 compE _ n _ = invalidForm n
 
 mathE :: (Rational -> Rational -> Rational) -> String -> PrimFunc
-mathE f _ [Integer a, Integer b] = return $ rat2expr $ f (toRational a) (toRational b)
-mathE f _ [Integer a, Real b]    = return $ rat2expr $ f (toRational a) (toRational b)
-mathE f _ [Real a, Integer b]    = return $ rat2expr $ f (toRational a) (toRational b)
-mathE f _ [Real a, Real b]       = return $ rat2expr $ f (toRational a) (toRational b)
+mathE f _ [Number a, Number b] = return $ Number $ f a b
 mathE _ n _ = invalidForm n
 
 integralMathE :: (Integer -> Integer -> Integer) -> String -> PrimFunc
-integralMathE f _ [Integer a, Integer b] = return $ Integer $ f a b
+integralMathE f n [Number a, Number b] = case (fromNumber a,fromNumber b) of
+  (Left a', Left b') -> return $ Number $ toRational $ f a' b'
+  _ -> invalidForm n
 integralMathE _ n _ = invalidForm n
 
 realMathUnaryE :: (Double -> Double) -> String -> PrimFunc
-realMathUnaryE f _ [Real v] = return $ rat2expr $ toRational $ f v
+realMathUnaryE f _ [Number v] = return $ Number $ toRational $ f $ fromRational v
 realMathUnaryE _ n _ = invalidForm n
 
 roundingMathE :: (Double -> Integer) -> String -> PrimFunc
-roundingMathE f _ [Real v] = return $ Integer $ f v
-roundingMathE f _ [Integer v] = return $ Integer $ f $ fromInteger v
+roundingMathE f _ [Number v] = return $ Number $ toRational $ f (fromRational v)
 roundingMathE _ n _ = invalidForm n
 
-rat2expr :: Rational -> Expression
-rat2expr x = if denominator x == 1 then (Integer $ numerator x) else (Real $ fromRational x)
-
 expoE :: String -> PrimFunc
-expoE _ [Integer a, Integer b] = return $ Integer $ a ^ b
-expoE _ [Real a, Integer b]    = return $ Real $ a ^ b
+expoE n [Number a,Number b] = case fromNumber b of
+  Left b' -> return $ Number $ (^) a b'
+  _ -> invalidForm n
 expoE n _                      = invalidForm n

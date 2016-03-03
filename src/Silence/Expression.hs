@@ -16,6 +16,7 @@ module Silence.Expression
   fromExpr,
   fromAtoms,
   envToAssoc,
+  fromNumber,
   -- * Misc
   invalidForm,
   showExpr
@@ -31,11 +32,8 @@ import qualified Data.HashMap.Strict as H
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import Data.Char
-import GHC.Integer.GMP.Internals
-import GHC.Types
-import GHC.Prim
+import Data.Ratio
 -- import System.Posix.IO
-import Debug.Trace
 
 -- |Monad in which Lisp expressions are evaluated
 newtype LispM a = LispM {
@@ -48,8 +46,9 @@ type PrimFunc = [Expression] -> LispM Expression -- TODO: Make this a state acti
 
 -- |A lisp expression.
 data Expression = Atom ByteString
-                | Integer Integer
-                | Real Double
+                | Number Rational
+                -- | Integer Integer
+                -- | Real Double
                 | Bool Bool
                 -- | FD Fd
                 | Environment [Scope]
@@ -65,10 +64,11 @@ instance Show Expression where
 
 instance Eq Expression where
   (Atom a) == (Atom b) = a == b
-  (Real a) == (Real b) = a == b
-  (Integer a) == (Real b) = (fromInteger a) == b
-  (Real b) == (Integer a) = b == (fromInteger a)
-  (Integer a) == (Integer b) = a == b
+  (Number a) == (Number b) = a == b
+  -- (Real a) == (Real b) = a == b
+  -- (Integer a) == (Real b) = (fromInteger a) == b
+  -- (Real b) == (Integer a) = b == (fromInteger a)
+  -- (Integer a) == (Integer b) = a == b
   (Bool a) == (Bool b) = a == b
   Null == Null = True
   (Cell a as) == (Cell b bs) = a == b && as == bs
@@ -77,8 +77,9 @@ instance Eq Expression where
 
 showExpr :: Expression -> ByteString
 showExpr (Atom x) = x
-showExpr (Integer x) = B.pack $ show x -- TODO: better means of showing 'Integers's
-showExpr (Real x) = B.pack $ show x -- TODO: better means of showing 'Double's (that doesn't use sci notation)
+showExpr (Number x) = B.pack $ either show show $ fromNumber x
+-- showExpr (Integer x) = B.pack $ show x -- TODO: better means of showing 'Integers's
+-- showExpr (Real x) = B.pack $ show x -- TODO: better means of showing 'Double's (that doesn't use sci notation)
 showExpr Null = "()"
 showExpr (Bool True)  = "#t"
 showExpr (Bool False) = "#f"
@@ -92,6 +93,12 @@ showExpr c@(Cell _ _) = "(" <> f "" c <> ")"
         f acc (Cell a b@(Cell _ _)) = f (acc <> showExpr a <> " ") b
         f acc (Cell a b) = acc <> showExpr a <> " . " <> showExpr b
         f _ _ = error "invalid cons list."
+
+-- |Convert a rational into either an 'Integer' or a 'Double'        
+fromNumber :: Rational -> Either Integer Double
+fromNumber r
+  | denominator r == 1 = Left $ numerator r
+  | otherwise = Right $ fromRational r
         
 -- |Turn an environment (@['Scope']@) into a lisp assoc list.
 envToAssoc :: [Scope] -> Expression
@@ -101,14 +108,13 @@ envToAssoc = foldr f Null
 -- |Lisp equivalent of Haskell's 'show'.
 toLispStr :: Expression -> Expression
 toLispStr = toIntList . showExpr
-  where toIntList = B.foldr (Cell . Integer . fastOrdInteger) Null
-        fastOrdInteger (C# c) = S# (ord# c)
+  where toIntList = B.foldr (Cell . Number . toRational . ord) Null
 
 -- |Turns a lisp string into a Haskell 'String'.     
 fromLispStr :: Expression -> Maybe String
 fromLispStr = fromExpr integer
-  where integer (Integer x) = Just $ chr $ fromInteger x
-        integer _           = Nothing
+  where integer (Number x) = either (Just . chr . fromInteger) (const Nothing) $ fromNumber x
+        integer _          = Nothing
         
 -- |Transform a cons list into a haskell list. It builds a function 
 -- that takes an empty list and returns a list of expressions.
