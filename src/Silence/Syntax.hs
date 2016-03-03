@@ -31,7 +31,7 @@ code = shebang *> exprs
   
 -- |Parser for an expression.
 expr :: Parsec ByteString () Expression
-expr = choice [equoted,elist,enumber,eatom,estring,ebool]
+expr = choice [equoted,elist,ebool,enumber,eatom,estring]
 
 -- |Skip comments & whitespace
 ignored :: Parsec ByteString () ()
@@ -49,8 +49,8 @@ eatom = fmap (Atom . B.pack) ident <?> "atom"
 
 ebool :: Parsec ByteString () Expression
 ebool = true <|> false <?> "bool"
-  where true  = try $ string "#t" *> return (Bool True)
-        false = try $ string "#f" *> return (Bool False)
+  where true  = try (string "#t" *> return (Bool True))
+        false = try (string "#f" *> return (Bool False))
 
 estring :: Parsec ByteString () Expression
 estring = wrap . toIntList <$> str <?> "string"

@@ -6,23 +6,7 @@
 ; This is an example of some of the Haskell-esque
 ; programming you can do with this language!
 
-; "show" function
-(func 'display (a) (begin (print (to-str a)) (print "\n") ))
-
-; map implementation (not tail recursive!)
-(func 'map (f xs)
-  (if (null? xs)
-    '()
-    (cons
-      (f (car xs))
-      (map f (cdr xs)))))
-      
-(func 'filter (f xs)
-  (if (null? xs)
-    '()
-    (if (f (car xs))
-      (cons (car xs) (filter f (cdr xs)))
-      (filter f (cdr xs)))))
+(import "stdlib.sl")
 
 ; using curried functions
 (display

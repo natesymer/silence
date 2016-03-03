@@ -14,6 +14,7 @@ module Silence.Expression
   fromConsList,
   toConsList,
   fromExpr,
+  fromAtoms,
   envToAssoc,
   -- * Misc
   invalidForm,
@@ -34,6 +35,7 @@ import GHC.Integer.GMP.Internals
 import GHC.Types
 import GHC.Prim
 -- import System.Posix.IO
+import Debug.Trace
 
 -- |Monad in which Lisp expressions are evaluated
 newtype LispM a = LispM {
@@ -42,6 +44,7 @@ newtype LispM a = LispM {
 
 type Scope = HashMap ByteString Expression
 type PrimFunc = [Expression] -> LispM Expression -- TODO: Make this a state action: [Expression] -> [Scope] -> IO (Expression,[Scope])
+          
 
 -- |A lisp expression.
 data Expression = Atom ByteString
@@ -57,6 +60,9 @@ data Expression = Atom ByteString
                 | Null
                 | Cell Expression Expression
 
+instance Show Expression where
+  show = B.unpack . showExpr
+
 instance Eq Expression where
   (Atom a) == (Atom b) = a == b
   (Real a) == (Real b) = a == b
@@ -70,7 +76,6 @@ instance Eq Expression where
   _ == _ = False
 
 showExpr :: Expression -> ByteString
-showExpr (Cell (Atom "quote") (Cell e Null)) = "'" <> showExpr e
 showExpr (Atom x) = x
 showExpr (Integer x) = B.pack $ show x -- TODO: better means of showing 'Integers's
 showExpr (Real x) = B.pack $ show x -- TODO: better means of showing 'Double's (that doesn't use sci notation)
@@ -78,6 +83,7 @@ showExpr Null = "()"
 showExpr (Bool True)  = "#t"
 showExpr (Bool False) = "#f"
 showExpr (Environment e) = showExpr $ envToAssoc e
+-- TODO: print if the procedure evals args
 showExpr (Procedure _ (-1) _) = "<procedure with indefinite arity>"
 showExpr (Procedure _ argc _) = "<procedure with arity " <> (B.pack $ show argc) <> ">"
 showExpr c@(Cell _ _) = "(" <> f "" c <> ")"
@@ -101,10 +107,8 @@ toLispStr = toIntList . showExpr
 -- |Turns a lisp string into a Haskell 'String'.     
 fromLispStr :: Expression -> Maybe String
 fromLispStr = fromExpr integer
-  where integer (Integer x) = Just $ fastChr x
+  where integer (Integer x) = Just $ chr $ fromInteger x
         integer _           = Nothing
-        fastChr (S# i) = C# (chr# i)
-        fastChr x = chr $ fromInteger x
         
 -- |Transform a cons list into a haskell list. It builds a function 
 -- that takes an empty list and returns a list of expressions.
@@ -115,28 +119,32 @@ fromConsList = f (Just id)
         f acc (Cell x xs) = f (fmap (. (:) x) acc) xs
         f _ _ = Nothing
     
--- |Make a cons list out of a haskell list.    
+-- |Make a cons list out of a Haskell list.    
 toConsList :: [Expression] -> Expression
 toConsList = foldr Cell Null
   
 -- |Coerce lisp cons list into a homogeneous haskell
 -- list of haskell values. For example: to turn a cons list
--- of 'Atom's into a haskell list of 'ByteStrings', you could do:
---
--- @
--- fromAtoms = fromExpr f
---   where f (Atom a) = Just a
---         f _ = Nothing
--- @
+-- of 'Atom's into a haskell list of 'ByteStrings', see 'fromAtoms'.
 fromExpr :: (Expression -> Maybe a) -- ^ function to unbox an expression
          -> Expression -- ^ hopefully a cons list
          -> Maybe [a]
 fromExpr f = (>>= (foldr f' (Just []))) . fromConsList
   where f' = (<*>) . fmap (:) . f
+  
+-- |Turn a cons list into a list of bytestrings, if each element is an Atom.
+fromAtoms :: Expression -> Maybe [ByteString]
+fromAtoms = fromExpr f
+  where f (Atom a) = Just a
+        f _ = Nothing
 
 -- |Specialized error message.
 invalidForm :: String -> LispM a
 invalidForm = error . (++) "invalid form: "
+
+-- TODO: Fix @evaluate@ procedure when used like @(evaluate (evaluate '+))@.
+-- That returns @(Atom "+")@ whereas @((. evaluate evaluate) '+)@ evaluates to
+-- a @Procedure@. This is probably a bug in evaluating nested proc calls.
         
 {-|Evaluate an 'Expression'.
 
@@ -159,8 +167,7 @@ The language will detect this and error out, providing an error message.
 -}
 evaluate :: Expression -> LispM Expression
 evaluate (Cell x xs) = evaluate x >>= f
-  where f p@(Procedure True _ _) = maybe err (((apply p) =<<) . mapM evaluate) (fromConsList xs)
-        f p@(Procedure False _ _) = maybe err (apply p) (fromConsList xs)
+  where f p@(Procedure _ _ _) = maybe err (apply p) (fromConsList xs)
         f _ = error "invalid expression: car is not a procedure"
         err = error "invalid expression: cdr is not a cons list"
 evaluate (Atom a) = get >>= f
@@ -168,11 +175,14 @@ evaluate (Atom a) = get >>= f
         f [] = error $ "cannot find " ++ B.unpack a
 evaluate x = return x
 
--- |Apply a procedure over arguments. Allows partial application.
+-- |Apply a procedure over arguments. Honors evalargs flag.
+-- Allows partial application.
 apply :: Expression -> [Expression] -> LispM Expression
-apply    (Procedure _ (-1) act) as  = act as
-apply    (Procedure _ 0 act) []     = act []
-apply    (Procedure _ 0 _) _        = error "procedure applied too many times"
-apply p'@(Procedure _ _ _) []       = return p'
-apply    (Procedure e c act) (a:as) = apply (Procedure e (c-1) $ act . (:) a) as
-apply    _                 _      = error "invalid procedure"
+apply    (Procedure False (-1) act) as  = act as
+apply    (Procedure True (-1) act)  as  = mapM evaluate as >>= act
+apply    (Procedure _ 0 act) []         = act []
+apply    (Procedure _ 0 _) _            = error "procedure applied too many times"
+apply p'@(Procedure _ _ _) []           = return p'
+apply    (Procedure False c act) (a:as) = apply (Procedure False (c-1) (act . (:) a)) as
+apply    (Procedure True c act)  (a:as) = evaluate a >>= \a' -> apply (Procedure True (c-1) (act . (:) a')) as
+apply    _                       _      = error "invalid procedure"
