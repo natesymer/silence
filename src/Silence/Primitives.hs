@@ -135,7 +135,7 @@ letParentBangE _ [Atom k,v] = modify' add >> return v
   where add [] = error "empty stack"
         add [_] = error "no parent scope"
         add (e:e':es) = e:(H.insert k v e'):es
-letParentBangE n as = (liftIO $ print as) >> invalidForm n
+letParentBangE n _ = invalidForm n
 
 -- |Compose two functions of arbitrary arities. If @barity@ is > 1,
 -- this will return a procedure. @((. b a)<args>)@ = @(b (a <args>))@
@@ -191,6 +191,7 @@ isNullE n _      = invalidForm n
 isListE :: String -> PrimFunc
 isListE n [Cell _ xs] = isListE n [xs]
 isListE _ [Null]      = return $ Bool True
+isListE _ [_]         = return $ Bool False
 isListE n _           = invalidForm n
 
 isPairE :: String -> PrimFunc
@@ -238,12 +239,12 @@ realMathUnaryE :: (Double -> Double) -> String -> PrimFunc
 realMathUnaryE f _ [Number v] = return $ Number $ toRational $ f $ fromRational v
 realMathUnaryE _ n _ = invalidForm n
 
-roundingMathE :: (Double -> Integer) -> String -> PrimFunc
-roundingMathE f _ [Number v] = return $ Number $ toRational $ f (fromRational v)
+roundingMathE :: (Rational -> Integer) -> String -> PrimFunc
+roundingMathE f _ [Number v] = return $ Number $ toRational $ f v
 roundingMathE _ n _ = invalidForm n
 
 expoE :: String -> PrimFunc
-expoE n [Number a,Number b] = case fromNumber b of
-  Left b' -> return $ Number $ (^) a b'
-  _ -> invalidForm n
+expoE _ [Number a,Number b] = return $ Number $ either l r $ fromNumber b
+  where r = toRational . (**) (fromRational a)
+        l = (^) a
 expoE n _ = invalidForm n
