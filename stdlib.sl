@@ -24,6 +24,17 @@
 (func '&& (a b) (if a (if b #t #f) #f))
 (func '|| (a b) (if a #t (if b #t #f)))
 
+; numerical functions
+
+; TODO: implement ^ based on the following haskell:
+; (^/) :: Rational -> Rational -> Rational
+; x ^/ (num :% den) = (root den x) ^ num
+;   where root n number = toRational $ 10 ** (((log number') / log 10) / n') -- TODO: stop using (**)
+;           where number' = fromRational number
+;                 n' = fromInteger n
+;(func 'nroot (n a) (^ a (/ (denominator n) (numerator n))))
+(func 'ln (x) (log (exp 1) x)) ;; TODO: pointfree
+
 
 ; Higher order functions
 

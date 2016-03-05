@@ -12,6 +12,7 @@ import Silence.Expression
 import Control.Monad
 import Text.Parsec
 import Data.Char
+import Data.Ratio
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 
@@ -85,12 +86,14 @@ elist = char '(' *> list' id <* char ')' <?> "list"
                   list' $ acc . Cell a] -- proper
 
 enumber :: Parsec ByteString () Expression
-enumber = choice [real,dec,nonBaseTen] <?> "number"
-  where real = try $ mkReal
-          <$> (toRational <$> sign)
-          <*> (toRational <$> option 0 (baseN 10))
-          <*> (toRational <$> baseNFrac 10)
-        mkReal s a = Number . (*) s . (+) a
+enumber = choice [fractional,dec,nonBaseTen] <?> "number"
+  where fractional = try $ do
+          s <- sign
+          whole <- option 0 (baseN 10)
+          fracDigits <- char '.' *> many1 digit
+          let f = return . Number . mkRat s whole (length fracDigits)
+          either fail f $ str2int 10 fracDigits
+          where mkRat s whole len v = ((s*whole) % 1) + (v % (10^len))
         sign = option 1 $ char '-' *> return (-1)
         dec  = try $ Number . toRational <$> ((*) <$> sign <*> baseN 10)
         nonBaseTen = char '#' *> choice [
@@ -101,21 +104,21 @@ enumber = choice [real,dec,nonBaseTen] <?> "number"
         intN = fmap (Number . toRational) . baseN
           
 baseN :: Int -> Parsec ByteString () Integer
-baseN n = (many1 alphaNum >>= f 0) <?> "based number"
-  where f acc [] = return acc
+baseN n
+  | n > 255 = fail "impossibly large base (greater than 255)"
+  | otherwise = (many1 alphaNum >>= either fail return . str2int n) <?> "based number"
+                
+str2int :: Int -> String -> Either String Integer
+str2int n s = f 0 s
+  where f :: Integer -> String -> Either String Integer
+        f acc [] = Right acc
         f acc (x:xs)
           | dec   < 10 = if dec   < n then g dec   else err
           | alphu < 36 = if alphu < n then g alphu else err
           | alphl < 36 = if alphl < n then g alphl else err
-          | otherwise = unexpected "non-alphanumeric character"
+          | otherwise = Left "unexpected numeral out of base"
           where dec = ord x - ord '0'
                 alphl = ord x - ord 'a' + 10
                 alphu = ord x - ord 'A' + 10
-                err = fail $ show x ++ " is larger than base " ++ show n
+                err = Left $ x : " is larger than base " ++ show n
                 g y = f ((+) acc . toInteger . (*) y . (^) n . length $ xs) xs
-                
-baseNFrac :: Int -> Parsec ByteString () Double
-baseNFrac n = char '.' *> ((flip ((.) . (. (10.0 ^)) . (/)) . subtract)
-  <$> (sourceColumn <$> getPosition)
-  <*> (fromInteger  <$> baseN n)
-  <*> (sourceColumn <$> getPosition))

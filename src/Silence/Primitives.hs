@@ -13,23 +13,21 @@ import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 
 import Data.Maybe
-import Data.Either
+import Data.Ratio
 import qualified Data.HashMap.Strict as H
 import qualified Data.ByteString.Char8 as B
 
 {- TODO
 * Real world features
   * randomness
-  * file descrptors
+  * file descrptors - see system programming
     * files
     * consoles
     * sockets (allows for networking!)
-  * import code (depends on file descriptors)
-  * concurrency
-  * system programming
+  * concurrency - see system programming
+  * system programming - primitive procedure that takes a list of args and a system call number
   * c interface
 * get-env & put-env
-* number equality vs naive equality
 -}
 
 primitiveConstants :: Scope
@@ -47,31 +45,28 @@ primitives = H.fromList [
   mkProc ">=" True 2 $ compE (>=),
   mkProc "<" True 2 $ compE (<),
   mkProc "<=" True 2 $ compE (<=),
-  mkProc "+" True 2 $ mathE (+),
-  mkProc "-" True 2 $ mathE (-),
-  mkProc "*" True 2 $ mathE (*),
-  mkProc "/" True 2 $ mathE (/),
-  mkProc "^" True 2 expoE,
-  mkProc "%" True 2 $ integralMathE rem,
-  mkProc "quot" True 2 $ integralMathE quot,
-  mkProc "round" True 1 $ roundingMathE round,
-  mkProc "ceil" True 1 $ roundingMathE ceiling,
-  mkProc "floor" True 1 $ roundingMathE floor,
-  mkProc "sin" True 1 $ realMathUnaryE sin,
-  mkProc "cos" True 1 $ realMathUnaryE cos,
-  mkProc "tan" True 1 $ realMathUnaryE tan,
-  mkProc "asin" True 1 $ realMathUnaryE asin,
-  mkProc "acos" True 1 $ realMathUnaryE acos,
-  mkProc "atan" True 1 $ realMathUnaryE atan,
+  mkProc "+" True 2 $ mathBinaryE (+),
+  mkProc "-" True 2 $ mathBinaryE (-),
+  mkProc "*" True 2 $ mathBinaryE (*),
+  mkProc "/" True 2 $ mathBinaryE (/),
+  mkProc "log" True 2 $ mathBinaryE $ wrapBinFrac logBase,
+  mkProc "exp" True 1 $ mathUnaryE $ wrapFrac exp,
+  mkProc "sin" True 1 $ mathUnaryE $ wrapFrac sin,
+  mkProc "cos" True 1 $ mathUnaryE $ wrapFrac cos,
+  mkProc "tan" True 1 $ mathUnaryE $ wrapFrac tan,
+  mkProc "asin" True 1 $ mathUnaryE $ wrapFrac asin,
+  mkProc "acos" True 1 $ mathUnaryE $ wrapFrac acos,
+  mkProc "atan" True 1 $ mathUnaryE $ wrapFrac atan,
   mkProc "to-str" True 1 toStrE,
   mkProc "to-atom" True 1 toAtomE,
   mkProc "cons" True 2 consE,
   mkProc "car" True 1 carE,
   mkProc "cdr" True 1 cdrE,
+  mkProc "numerator" True 1 numeratorE,
+  mkProc "denominator" True 1 denominatorE,
   mkProc "print" True 1 printE, -- print a string
   mkProc "proc?" True 1 isProcE,
-  mkProc "integer?" True 1 isIntegerE,
-  mkProc "real?" True 1 isRealE,
+  mkProc "number?" True 1 isNumberE,
   mkProc "string?" True 1 isStringE,
   mkProc "atom?" True 1 isAtomE,
   mkProc "null?" True 1 isNullE,
@@ -82,11 +77,10 @@ primitives = H.fromList [
   mkProc "let-parent!" True 2 letParentBangE,
   mkProc "if" False 3 ifE,
   mkProc "quote" False 1 (const $ return . head), -- inhibit evaluation
-  mkProc "unquote" True 1 (const $ return . head), -- inverse of @quote@
   mkProc "lambda" False 2 $ lambdaE True, -- this one evaluates arguments
   mkProc "lambda!" False 2 $ lambdaE False, -- this one *doesn't* evaluate arguments
-  mkProc "mk-lambda" True 2 $ lambdaE True, -- like lambda, but it's args are evaluated
-  mkProc "mk-lambda!" True 2 $ lambdaE False, -- like lambda, but it's args are evaluated
+  mkProc "mk-lambda" True 2 $ lambdaE True, -- like lambda, but its args are evaluated
+  mkProc "mk-lambda!" True 2 $ lambdaE False, -- like lambda, but its args are evaluated
   mkProc "evaluate" True 1 (const $ evaluate . head),
   mkProc "import" True 1 importE, -- load a source code file and evaluate it
   mkProc "begin" True (-1) (const $ return . last) -- sequential evaluation using language semantics
@@ -166,13 +160,10 @@ isProcE _ [Procedure _ _ _] = return $ Bool True
 isProcE _ [_]               = return $ Bool False
 isProcE n _                 = invalidForm n
 
-isIntegerE :: String -> PrimFunc
-isIntegerE _ [Number b] = return $ Bool $ isLeft $ fromNumber b
-isIntegerE n _           = invalidForm n
-
-isRealE :: String -> PrimFunc
-isRealE _ [Number b] = return $ Bool $ isRight $ fromNumber b
-isRealE n _          = invalidForm n
+isNumberE :: String -> PrimFunc
+isNumberE _ [Number _] = return $ Bool True
+isNumberE _ [_]        = return $ Bool False
+isNumberE n _          = invalidForm n
 
 isStringE :: String -> PrimFunc
 isStringE _ [xs] = return $ Bool $ isJust $ fromLispStr xs
@@ -225,26 +216,24 @@ compE :: (Rational -> Rational -> Bool) -> String -> PrimFunc
 compE p _ [Number a, Number b] = return $ Bool $ p a b
 compE _ n _ = invalidForm n
 
-mathE :: (Rational -> Rational -> Rational) -> String -> PrimFunc
-mathE f _ [Number a, Number b] = return $ Number $ f a b
-mathE _ n _ = invalidForm n
+mathBinaryE :: (Rational -> Rational -> Rational) -> String -> PrimFunc
+mathBinaryE f _ [Number a, Number b] = return $ Number $ f a b
+mathBinaryE _ n _ = invalidForm n
 
-integralMathE :: (Integer -> Integer -> Integer) -> String -> PrimFunc
-integralMathE f n [Number a, Number b] = case (fromNumber a,fromNumber b) of
-  (Left a', Left b') -> return $ Number $ toRational $ f a' b'
-  _ -> invalidForm n
-integralMathE _ n _ = invalidForm n
+mathUnaryE :: (Rational -> Rational) -> String -> PrimFunc
+mathUnaryE f _ [Number a] = return $ Number $ f a
+mathUnaryE _ n _ = invalidForm n
 
-realMathUnaryE :: (Double -> Double) -> String -> PrimFunc
-realMathUnaryE f _ [Number v] = return $ Number $ toRational $ f $ fromRational v
-realMathUnaryE _ n _ = invalidForm n
+wrapBinFrac :: RealFrac a => (a -> a -> a) -> Rational -> Rational -> Rational
+wrapBinFrac f a b = toRational $ f (fromRational a) (fromRational b)
 
-roundingMathE :: (Rational -> Integer) -> String -> PrimFunc
-roundingMathE f _ [Number v] = return $ Number $ toRational $ f v
-roundingMathE _ n _ = invalidForm n
+wrapFrac :: RealFrac a => (a -> a) -> Rational -> Rational
+wrapFrac f a = toRational $ f (fromRational a)
 
-expoE :: String -> PrimFunc
-expoE _ [Number a,Number b] = return $ Number $ either l r $ fromNumber b
-  where r = toRational . (**) (fromRational a)
-        l = (^) a
-expoE n _ = invalidForm n
+numeratorE :: String -> PrimFunc
+numeratorE _ [Number v] = return $ Number $ numerator v % 1
+numeratorE n _ = invalidForm n
+
+denominatorE :: String -> PrimFunc
+denominatorE _ [Number v] = return $ Number $ denominator v % 1
+denominatorE n _ = invalidForm n

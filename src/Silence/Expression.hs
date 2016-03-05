@@ -168,8 +168,8 @@ evaluate (Cell x xs) = evaluate x >>= f
         f _ = error "invalid expression: car is not a procedure"
         err = error "invalid expression: cdr is not a cons list"
 evaluate (Atom a) = get >>= f
-  where f (x:xs) = maybe (f xs) return $ H.lookup a x
-        f [] = error $ "cannot find " ++ B.unpack a
+  where f [] = error $ "cannot find " ++ B.unpack a
+        f (x:xs) = maybe (f xs) return $ H.lookup a x
 evaluate x = return x
 
 -- |Apply a procedure over arguments. Honors evalargs flag.
@@ -182,4 +182,4 @@ apply    (Procedure _ 0 _) _            = error "procedure applied too many time
 apply p'@(Procedure _ _ _) []           = return p'
 apply    (Procedure False c act) (a:as) = apply (Procedure False (c-1) (act . (:) a)) as
 apply    (Procedure True c act)  (a:as) = evaluate a >>= \a' -> apply (Procedure True (c-1) (act . (:) a')) as
-apply    _                       _      = error "invalid procedure"
+apply    _                       _      = error "cannot apply non-procedure"
