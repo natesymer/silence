@@ -38,51 +38,51 @@ primitiveConstants = H.fromList []
 -- |Primitive procedures that cannot be implemented in lisp.
 primitives :: Scope
 primitives = H.fromList [
-  mkProc "." True 2 $ binaryMaybe compose,-- composeE, -- function composition, result of 2nd proc gets passed to 1st proc.
-  mkProc "=" True 2 $ binary $ ((return . Bool) .) . (==),
-  mkProc ">" True 2 $ compE (>),
-  mkProc ">=" True 2 $ compE (>=),
-  mkProc "<" True 2 $ compE (<),
-  mkProc "<=" True 2 $ compE (<=),
-  mkProc "+" True 2 $ mathBinaryE (+),
-  mkProc "-" True 2 $ mathBinaryE (-),
-  mkProc "*" True 2 $ mathBinaryE (*),
-  mkProc "/" True 2 $ mathBinaryE (/),
-  mkProc "log" True 2 $ mathBinaryE $ wrapBinReal logBase,
-  mkProc "exp" True 1 $ mathUnaryE $ wrapReal exp,
-  mkProc "sin" True 1 $ mathUnaryE $ wrapReal sin,
-  mkProc "cos" True 1 $ mathUnaryE $ wrapReal cos,
-  mkProc "tan" True 1 $ mathUnaryE $ wrapReal tan,
-  mkProc "asin" True 1 $ mathUnaryE $ wrapReal asin,
-  mkProc "acos" True 1 $ mathUnaryE $ wrapReal acos,
-  mkProc "atan" True 1 $ mathUnaryE $ wrapReal atan,
-  mkProc "numerator" True 1 $ mathUnaryE $ (% 1) . numerator,
-  mkProc "denominator" True 1 $ mathUnaryE $ (% 1) . denominator,
-  mkProc "print" True 1 $ stringArg $ lispVoid . liftIO . putStr, -- print a string
-  mkProc "proc?" True 1 $ typePredE isProc,
-  mkProc "number?" True 1 $ typePredE isNumber,
-  mkProc "string?" True 1 $ typePredE isString,
-  mkProc "atom?" True 1 $ typePredE isAtom,
-  mkProc "null?" True 1 $ typePredE isNull,
-  mkProc "list?" True 1 $ typePredE isList,
-  mkProc "pair?" True 1 $ typePredE isPair,
-  mkProc "read" True 1 $ stringArg $ return . parseSilence . B.pack, -- parse a string of code
-  mkProc "show" True 1 $ unary $ return . toLispStr,
-  mkProc "mk-atom" True 1 $ stringArg $ return . Atom . B.pack,
-  mkProc "cons" True 2 $ binary $ (return .) . Cell,
-  mkProc "car" True 1 $ unaryMaybe car,
-  mkProc "cdr" True 1 $ unaryMaybe cdr,
-  mkProc "if" False 3 $ ternary $ \x t f -> evaluate . bool f t . isTruthy =<< evaluate x,
-  mkProc "let!" True 2 letBangE,
-  mkProc "let-parent!" True 2 letParentBangE,
-  mkProc "quote" False 1 $ const $ return . head, -- inhibit evaluation
-  mkProc "lambda" False 2 $ lambdaE True, -- this one evaluates arguments
-  mkProc "lambda!" False 2 $ lambdaE False, -- this one *doesn't* evaluate arguments
-  mkProc "mk-lambda" True 2 $ lambdaE True, -- like lambda, but its args are evaluated
-  mkProc "mk-lambda!" True 2 $ lambdaE False, -- like lambda, but its args are evaluated
-  mkProc "evaluate" True 1 $ const $ evaluate . head,
-  mkProc "import" True 1 $ stringArg $ (=<<) (evaluate . parseSilence) . liftIO . B.readFile,
-  mkProc "begin" True (-1) $ const $ return . last -- sequential evaluation using language semantics
+  mkProc "."           True  2 $ binaryMaybe compose,
+  mkProc "="           True  2 $ binary $ ((return . Bool) .) . (==),
+  mkProc ">"           True  2 $ compE (>),
+  mkProc ">="          True  2 $ compE (>=),
+  mkProc "<"           True  2 $ compE (<),
+  mkProc "<="          True  2 $ compE (<=),
+  mkProc "+"           True  2 $ mathBinaryE (+),
+  mkProc "-"           True  2 $ mathBinaryE (-),
+  mkProc "*"           True  2 $ mathBinaryE (*),
+  mkProc "/"           True  2 $ mathBinaryE (/),
+  mkProc "log"         True  2 $ mathBinaryE $ wrapBinReal logBase,
+  mkProc "exp"         True  1 $ mathUnaryE $ wrapReal exp,
+  mkProc "sin"         True  1 $ mathUnaryE $ wrapReal sin,
+  mkProc "cos"         True  1 $ mathUnaryE $ wrapReal cos,
+  mkProc "tan"         True  1 $ mathUnaryE $ wrapReal tan,
+  mkProc "asin"        True  1 $ mathUnaryE $ wrapReal asin,
+  mkProc "acos"        True  1 $ mathUnaryE $ wrapReal acos,
+  mkProc "atan"        True  1 $ mathUnaryE $ wrapReal atan,
+  mkProc "numerator"   True  1 $ mathUnaryE $ (% 1) . numerator,
+  mkProc "denominator" True  1 $ mathUnaryE $ (% 1) . denominator,
+  mkProc "print"       True  1 $ stringArg $ lispVoid . liftIO . putStr,
+  mkProc "proc?"       True  1 $ typePredE isProc,
+  mkProc "number?"     True  1 $ typePredE isNumber,
+  mkProc "string?"     True  1 $ typePredE isString,
+  mkProc "atom?"       True  1 $ typePredE isAtom,
+  mkProc "null?"       True  1 $ typePredE isNull,
+  mkProc "list?"       True  1 $ typePredE isList,
+  mkProc "pair?"       True  1 $ typePredE isPair,
+  mkProc "read"        True  1 $ stringArg $ return . parseSilence . B.pack,
+  mkProc "show"        True  1 $ unary $ return . toLispStr,
+  mkProc "mk-atom"     True  1 $ stringArg $ return . Atom . B.pack,
+  mkProc "cons"        True  2 $ binary $ (return .) . Cell,
+  mkProc "car"         True  1 $ unaryMaybe car,
+  mkProc "cdr"         True  1 $ unaryMaybe cdr,
+  mkProc "if"          False 3 $ ternary $ \x t f -> evaluate . bool f t . isTruthy =<< evaluate x,
+  mkProc "let!"        True  2 letBangE, -- set a key/value pair in the current env.
+  mkProc "let-parent!" True  2 letParentBangE, -- like @let!@, except it modifies the parent env.
+  mkProc "lambda"      False 2 $ lambdaE True, -- this one evaluates arguments
+  mkProc "lambda!"     False 2 $ lambdaE False, -- this one *doesn't* evaluate arguments
+  mkProc "mk-lambda"   True  2 $ lambdaE True, -- like lambda, but its args are evaluated
+  mkProc "mk-lambda!"  True  2 $ lambdaE False, -- like lambda, but its args are evaluated
+  mkProc "evaluate"    True  1 $ const $ evaluate . head,
+  mkProc "quote"       False 1 $ const $ return . head,
+  mkProc "import"      True  1 $ stringArg $ (=<<) (evaluate . parseSilence) . liftIO . B.readFile,
+  mkProc "begin"       True  (-1) $ const $ return . last
   ]
 
 -- TODO: make error handling not require a parameter to be passed
@@ -92,13 +92,11 @@ mkProc name eval arity body = (name, Procedure eval arity $ body $ B.unpack name
 lambdaE :: Bool -> String -> PrimFunc
 lambdaE evalArgs n = (>>=) get . flip (flip binaryMaybe n . mkLambda evalArgs)
 
--- |Set a key/value pair in the current env.
 letBangE :: String -> PrimFunc
 letBangE _ [Atom k,v] = v <$ modify' add
   where add = maybe (error "empty stack") (uncurry ((:) . H.insert k v)) . uncons
 letBangE n _ = invalidForm n
 
--- |Like letBangE, except it modifies the parent env.
 letParentBangE :: String -> PrimFunc
 letParentBangE n as = get >>= maybe (error "empty stack") (uncurry f) . uncons
   where f e es = put es *> letBangE n as <* (get >>= put . (:) e)

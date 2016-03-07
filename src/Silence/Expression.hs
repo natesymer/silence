@@ -152,7 +152,9 @@ cdr :: Expression -> Maybe Expression
 cdr (Cell _ v) = Just v
 cdr _          = Nothing
   
--- |compose two procedures of arbitrary arities.
+-- |compose two procedures of arbitrary arities. The result of 
+-- second proc gets passed to the first. Does not matter if
+-- this fully applies the first.
 compose :: Expression -> Expression -> Maybe Expression
 compose (Procedure _ barity b) (Procedure eargs aarity a) = 
   Just $ Procedure eargs aarity ((apply procb . pure =<<) . a)
