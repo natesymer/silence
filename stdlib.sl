@@ -11,7 +11,7 @@
       (mk-lambda args body))))
 
 ; TODO: let form for binding in a given scope
-; eg (let 'a 1 (display a))
+; eg (let 'a "str" (print a))
 ; doesn't work: ; (func 'let (k v b) ((mk-lambda '(k) 'b) v))
 
 (func 'newline () (print "\n"))
@@ -33,7 +33,9 @@
 ;           where number' = fromRational number
 ;                 n' = fromInteger n
 ;(func 'nroot (n a) (^ a (/ (denominator n) (numerator n))))
-(func 'ln (x) (log (exp 1) x)) ;; TODO: pointfree
+
+; (func '^ (x n) ) ;; TODO: implement me!
+(let! 'ln (log (exp 1)))
 
 
 ; Higher order functions

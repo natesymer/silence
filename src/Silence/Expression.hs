@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, MagicHash #-}
+{-# LANGUAGE OverloadedStrings, GeneralizedNewtypeDeriving, FlexibleContexts #-}
 module Silence.Expression
 (
   Scope,
@@ -15,10 +15,24 @@ module Silence.Expression
   toConsList,
   fromExpr,
   fromAtoms,
-  envToAssoc,
   fromNumber,
+  car,
+  cdr,
+  compose,
+  mkLambda,
+  -- * Type Predicates
+  isProc,
+  isNumber,
+  isString,
+  isAtom,
+  isNull,
+  isList,
+  isPair,
+  isBool,
+  isTruthy,
   -- * Misc
   invalidForm,
+  lispVoid,
   showExpr
 )
 where
@@ -27,11 +41,12 @@ import Control.Monad.IO.Class
 import Control.Monad.State.Strict
 
 import Data.Monoid
+import Data.Maybe
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as H
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
-import Data.Char
+import Data.Char hiding (isNumber)
 import Data.Ratio
 -- import System.Posix.IO
 
@@ -48,7 +63,6 @@ data Expression = Atom ByteString
                 | Number Rational
                 | Bool Bool
                 -- | FD Fd
-                | Environment [Scope]
                 | Procedure
                     Bool -- @'True'@ if arguments should be evaluated in 'evaluate'
                     Int -- arity
@@ -65,7 +79,6 @@ instance Eq Expression where
   (Bool a) == (Bool b) = a == b
   Null == Null = True
   (Cell a as) == (Cell b bs) = a == b && as == bs
-  (Environment a) == (Environment b) = a == b
   _ == _ = False
 
 showExpr :: Expression -> ByteString
@@ -74,7 +87,6 @@ showExpr (Number x) = B.pack $ either show show $ fromNumber x
 showExpr Null = "()"
 showExpr (Bool True)  = "#t"
 showExpr (Bool False) = "#f"
-showExpr (Environment e) = showExpr $ envToAssoc e
 -- TODO: print if the procedure evals args
 showExpr (Procedure _ (-1) _) = "<procedure with indefinite arity>"
 showExpr (Procedure _ argc _) = "<procedure with arity " <> (B.pack $ show argc) <> ">"
@@ -90,12 +102,7 @@ fromNumber :: Rational -> Either Integer Double
 fromNumber r
   | denominator r == 1 = Left $ numerator r
   | otherwise = Right $ fromRational r
-        
--- |Turn an environment (@['Scope']@) into a lisp assoc list.
-envToAssoc :: [Scope] -> Expression
-envToAssoc = foldr f Null
-  where f = Cell . foldr Cell Null . map (uncurry (Cell . Atom)) . H.toList
-
+  
 -- |Lisp equivalent of Haskell's 'show'.
 toLispStr :: Expression -> Expression
 toLispStr = toIntList . showExpr
@@ -134,45 +141,105 @@ fromAtoms :: Expression -> Maybe [ByteString]
 fromAtoms = fromExpr f
   where f (Atom a) = Just a
         f _ = Nothing
+        
+-- |lisp @car@.
+car :: Expression -> Maybe Expression
+car (Cell v _) = Just v
+car _          = Nothing
+
+-- |lisp @cdr@.
+cdr :: Expression -> Maybe Expression
+cdr (Cell _ v) = Just v
+cdr _          = Nothing
+  
+-- |compose two procedures of arbitrary arities.
+compose :: Expression -> Expression -> Maybe Expression
+compose (Procedure _ barity b) (Procedure eargs aarity a) = 
+  Just $ Procedure eargs aarity ((apply procb . pure =<<) . a)
+  where procb = Procedure False barity b
+compose _ _ = Nothing
+
+-- |construct a lambda expression.
+mkLambda :: Bool -> [Scope] -> Expression -> Expression -> Maybe Expression
+mkLambda evalArgs cap a@(Atom _) body = mkLambda evalArgs cap (Cell a Null) body
+mkLambda evalArgs cap args body = maybe Nothing (Just . lambda) (fromAtoms args)
+  where lambda ["*"] = scoped (-1) (H.singleton "args" . toConsList)
+        lambda xs = scoped (length xs) (H.fromList . zip xs)
+        scoped arity f = Procedure evalArgs arity $ \as -> do
+          modify' ((:) (mconcat $ (f as):cap))
+          evaluate body <* modify' tail
 
 -- |Specialized error message.
-invalidForm :: String -> LispM a
+invalidForm :: String -> a
 invalidForm = error . (++) "invalid form: "
 
--- TODO: Fix @evaluate@ procedure when used like @(evaluate (evaluate '+))@.
--- That returns @(Atom "+")@ whereas @((. evaluate evaluate) '+)@ evaluates to
--- a @Procedure@. This is probably a bug in evaluating nested proc calls.
-        
+lispVoid :: LispM a -> LispM Expression
+lispVoid = (<$) Null
+
+-- |Type predicates
+
+isProc :: Expression -> Bool
+isProc (Procedure _ _ _) = True
+isProc _                 = False
+
+isNumber :: Expression -> Bool
+isNumber (Number _) = True
+isNumber _          = False
+
+isString :: Expression -> Bool
+isString = isJust . fromLispStr
+
+isAtom ::  Expression -> Bool
+isAtom (Atom _) = True
+isAtom _        = False
+
+isNull :: Expression -> Bool
+isNull Null = True
+isNull _    = False
+
+isList :: Expression -> Bool
+isList Null        = True
+isList (Cell _ xs) = isList xs
+isList _           = False
+
+isPair :: Expression -> Bool
+isPair (Cell _ _) = True
+isPair _          = False
+
+isBool :: Expression -> Bool
+isBool (Bool _) = True
+isBool _        = False
+
+isTruthy :: Expression -> Bool
+isTruthy (Bool False) = False
+isTruthy _            = True
+
 {-|Evaluate an 'Expression'.
 
 * Atoms are evaluated by looking their string value up in the environment.
 
-* Values of all other "types" are not modified.
-
 * Cells are assumed to be s-expressions. They are evaluated as follows:
 
-    * Convert the cell into a list
+    * Evaluate the @car@ of the list
 
-    * Evaluate each member of the list if the procedure requires it
+    * Use the haskell 'apply' function to evaluate the procedure with
+      arguments given as a cons list in the @cdr@ of the cell.
 
-    * Apply the procedure in the head of the list to the tail of the list.
-
-         * Procedure application is curried if the arity is positive
+* Values of all other "types" are not modified.
 
 If an expression doesn't match any of the preceding rules, it is invalid.
 The language will detect this and error out, providing an error message.
 -}
 evaluate :: Expression -> LispM Expression
-evaluate (Cell x xs) = evaluate x >>= f
-  where f p@(Procedure _ _ _) = maybe err (apply p) (fromConsList xs)
-        f _ = error "invalid expression: car is not a procedure"
-        err = error "invalid expression: cdr is not a cons list"
-evaluate (Atom a) = get >>= f
-  where f [] = error $ "cannot find " ++ B.unpack a
-        f (x:xs) = maybe (f xs) return $ H.lookup a x
+evaluate (Cell x xs) = evaluate x >>= flip (maybe err . apply) (fromConsList xs)
+  where err = error "invalid arguments: not a cons list"
+evaluate (Atom a) = fromMaybe err . foldl f Nothing <$> get
+  where f z x = maybe (H.lookup a x) Just z
+        err = error $ "cannot find " ++ B.unpack a
 evaluate x = return x
 
--- |Apply a procedure over arguments. Honors evalargs flag.
+-- |Apply a procedure over arguments.
+-- Evaluates arguments according to the evalargs flag.
 -- Allows partial application.
 apply :: Expression -> [Expression] -> LispM Expression
 apply    (Procedure False (-1) act) as  = act as
@@ -182,4 +249,4 @@ apply    (Procedure _ 0 _) _            = error "procedure applied too many time
 apply p'@(Procedure _ _ _) []           = return p'
 apply    (Procedure False c act) (a:as) = apply (Procedure False (c-1) (act . (:) a)) as
 apply    (Procedure True c act)  (a:as) = evaluate a >>= \a' -> apply (Procedure True (c-1) (act . (:) a')) as
-apply    _                       _      = error "cannot apply non-procedure"
+apply    _                       _      = error "invalid procedure"
