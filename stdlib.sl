@@ -15,7 +15,7 @@
 ; doesn't work: ; (func 'let (k v b) ((mk-lambda '(k) 'b) v))
 
 (func 'newline () (print "\n"))
-(func 'show (a) (begin (print (to-str a)) (newline)))
+(func 'display (a) (begin (print (show a)) (newline)))
 (func 'println (a) (begin (print a) (newline)))
 
 ; Logical operations

@@ -8,6 +8,7 @@ where
   
 import Silence.Syntax
 import Silence.Expression
+import Silence.FFI
 
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict
@@ -15,6 +16,7 @@ import Control.Monad.State.Strict
 import Data.Bool
 import Data.List
 import Data.Ratio
+import Data.Maybe
 import qualified Data.HashMap.Strict as H
 import qualified Data.ByteString.Char8 as B
 
@@ -82,7 +84,8 @@ primitives = H.fromList [
   mkProc "evaluate"    True  1 $ const $ evaluate . head,
   mkProc "quote"       False 1 $ const $ return . head,
   mkProc "import"      True  1 $ stringArg $ (=<<) (evaluate . parseSilence) . liftIO . B.readFile,
-  mkProc "begin"       True  (-1) $ const $ return . last
+  mkProc "begin"       True  (-1) $ const $ return . last,
+  mkProc "foreign"     True  2 foreignE
   ]
 
 -- TODO: make error handling not require a parameter to be passed
@@ -100,6 +103,12 @@ letBangE n _ = invalidForm n
 letParentBangE :: String -> PrimFunc
 letParentBangE n as = get >>= maybe (error "empty stack") (uncurry f) . uncons
   where f e es = put es *> letBangE n as <* (get >>= put . (:) e)
+
+foreignE :: String -> PrimFunc
+foreignE n [fp,Atom funcname] = return $ Procedure True (-1) $ fromMaybe (invalidForm n) $ do
+  fp' <- fromLispStr fp
+  return $ loadForeignProcedure fp' (B.unpack funcname)
+foreignE n _ = invalidForm n
 
 unary :: (Expression -> LispM Expression) -> String -> PrimFunc
 unary f n = maybe (invalidForm n) f . fmap fst . uncons

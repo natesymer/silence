@@ -48,7 +48,8 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import Data.Char hiding (isNumber)
 import Data.Ratio
--- import System.Posix.IO
+
+import Foreign.Ptr
 
 -- |Monad in which Lisp expressions are evaluated
 newtype LispM a = LispM {
@@ -58,17 +59,18 @@ newtype LispM a = LispM {
 type Scope = HashMap ByteString Expression
 type PrimFunc = [Expression] -> LispM Expression -- TODO: Make this a state action: [Expression] -> [Scope] -> IO (Expression,[Scope])
 
+-- TODO: storable/ptr instance
 -- |A lisp expression.
 data Expression = Atom ByteString
                 | Number Rational
                 | Bool Bool
-                -- | FD Fd
                 | Procedure
                     Bool -- @'True'@ if arguments should be evaluated in 'evaluate'
                     Int -- arity
                     PrimFunc -- state action
                 | Null
                 | Cell Expression Expression
+                | Pointer (Ptr ())
 
 instance Show Expression where
   show = B.unpack . showExpr
@@ -79,6 +81,7 @@ instance Eq Expression where
   (Bool a) == (Bool b) = a == b
   Null == Null = True
   (Cell a as) == (Cell b bs) = a == b && as == bs
+  (Pointer a) == (Pointer b) = a == b
   _ == _ = False
 
 showExpr :: Expression -> ByteString
@@ -96,6 +99,7 @@ showExpr c@(Cell _ _) = "(" <> f "" c <> ")"
         f acc (Cell a b@(Cell _ _)) = f (acc <> showExpr a <> " ") b
         f acc (Cell a b) = acc <> showExpr a <> " . " <> showExpr b
         f _ _ = error "invalid cons list."
+showExpr (Pointer p) = B.pack $ show p
 
 -- |Convert a rational into either an 'Integer' or a 'Double'        
 fromNumber :: Rational -> Either Integer Double
@@ -151,7 +155,7 @@ car _          = Nothing
 cdr :: Expression -> Maybe Expression
 cdr (Cell _ v) = Just v
 cdr _          = Nothing
-  
+
 -- |compose two procedures of arbitrary arities. The result of 
 -- second proc gets passed to the first. Does not matter if
 -- this fully applies the first.

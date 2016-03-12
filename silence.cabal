@@ -22,4 +22,5 @@ executable silence
                      mtl,
                      unordered-containers,
                      parsec,
-                     optparse-applicative
+                     optparse-applicative,
+                     unix
