@@ -14,6 +14,14 @@ Expression * mallocExpr(uint8_t tc,uint8_t nptrs) {
   return e;
 }
 
+Expression * copyExpr(Expression *e) {
+  Expression *cpy = mallocExpr(e->typecode,e->num_ptrs);
+  
+  // TODO: write copying logic
+  
+  return cpy;
+}
+
 // free any expression
 void freeExpression(Expression *e) {
   for (uint8_t i = 0; i < e->num_ptrs; i++) {
@@ -116,8 +124,83 @@ int isTruthy(Expression *e) {
   else return 0;
 }
 
+// PROCEDURE
+
+Expression * mkProcedure(uint8_t evalArgs,uint8_t arity, CSig body) {
+  ALLOC_SINGLETON(uint8_t,eabuf,evalArgs);
+  ALLOC_SINGLETON(uint8_t,abuf,arity);
+  ALLOC_SINGLETON(CSig,bbuf,body);
+  Expression *e = mallocExpr(3,3);
+  e->ptrs[0] = eabuf;
+  e->ptrs[1] = abuf;
+  e->ptrs[2] = bbuf;
+  return e;
+}
+
+// TODO write @apply@
+int isProcedure(Expression *e) {
+  return e->typecode == 3;
+}
+
 // NULL
 
 Expression * mkNull() {
   return mallocExpr(4,0);
+}
+
+int isNull(Expression *e) {
+  return e->typecode == 4;
+}
+
+// CELL
+
+Expression * mkCell(Expression *a,Expression *d) {
+  ALLOC_SINGLETON(Expression *,carbuf,a);
+  ALLOC_SINGLETON(Expression *,cdrbuf,d);
+  Expression *e = mallocExpr(5,2);
+  e->ptrs[0] = carbuf;
+  e->ptrs[1] = cdrbuf;
+  return e;
+}
+
+int isCell(Expression *e) {
+  return e->typecode == 5;
+}
+
+int car(Expression *cell,Expression **out) {
+  if (!isCell(cell)) return -1;
+  else {
+    *out = *((Expression **)(cell->ptrs[0]));
+    return 0;
+  }
+}
+
+int cdr(Expression *cell,Expression **out) {
+  if (!isCell(cell)) return -1;
+  else {
+    *out = *((Expression **)(cell->ptrs[1]));
+    return 0;
+  }
+}
+
+// POINTER
+
+Expression * mkPointer(void *ptr) {
+  ALLOC_SINGLETON(void *,ptrbuf,ptr);
+  
+  Expression *e = mallocExpr(6,1);
+  e->ptrs[0] = ptrbuf;
+  return e;
+}
+
+int isPointer(Expression *e) {
+  return e->typecode == 6;
+}
+
+int getPointer(Expression *e,void **out) {
+  if (!isPointer(e)) return -1;
+  else {
+    *out = *((void **)(e->ptrs[0]));
+    return 0;
+  }
 }

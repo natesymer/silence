@@ -34,7 +34,7 @@ instance Storable Expression where
   sizeOf    _ = #const sizeof(Expression)
   alignment _ = alignment (undefined :: Ptr ())
   peek ptr = do
-    (typecode,numPtrs,ptrs) <- peekExpr ptr
+    (typecode,_,ptrs) <- peekExpr ptr
     -- TODO: proper bounds checking for @ptrs@
     case typecode of
       0 -> do
@@ -55,9 +55,7 @@ instance Storable Expression where
       5 -> Cell
            <$> (peekPtrs 0 ptrs >>= peek)
            <*> (peekPtrs 1 ptrs >>= peek)
-      6 -> do
-        (p :: Ptr Expression) <- peekPtrs 0 ptrs
-        return $ Pointer (castPtr p)
+      6 -> Pointer <$> (peekPtrs 0 ptrs >>= peek)
       _ -> return Null
   poke ptr (Atom x) = withForeignPtr fptr $ \buf -> do
       lenP <- mallocSingleton (CInt (fromIntegral len))
@@ -131,20 +129,11 @@ foreign import ccall "wrapper"
 -- the following rule holds: @'toCSig' '.' 'fromCSig' = 'id'@
 fromCSig :: CSig -> PrimFunc
 fromCSig cf es = liftIO $ bracket (withCArgs $ cf $ length es) free peek
-  where
-    withCArgs = bracket allocArgs freeArgs
-    allocArg expr = do
-      ptr <- mallocBytes (sizeOf expr)
-      poke ptr expr
-      return ptr
-    allocArgs = mapM allocArg es >>= mallocN
-      -- do
-      -- ptr <- mallocBytes $ (sizeOf (undefined :: Ptr ())) * (length es)
-      -- pokeArray ptr =<< mapM allocArg es
-      -- return ptr
-    freeArgs ptr = (peekArray (length es) ptr >>= go) >> free ptr
-      where go [] = return ()
-            go (x:xs) = free x >> go xs
+  where withCArgs = bracket allocArgs freeArgs
+        allocArgs = mapM (fmap castPtr . mallocSingleton) es >>= mallocN
+        freeArgs ptr = (peekArray (length es) ptr >>= go) >> free ptr
+          where go [] = return ()
+                go (x:xs) = free x >> go xs
 
 -- TODO: environment?
 -- |Wrap a Haskell LISP function in a C LISP function.
