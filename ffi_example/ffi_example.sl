@@ -2,7 +2,10 @@
 
 (import "../stdlib.sl")
 
-(func 'testffi (a) ((foreign "example.dylib" 'testFFI) a))
+(func 'gettype (a) ((foreign "example.dylib" 'showtype) a))
+(func 'print-number (a) ((foreign "example.dylib" 'print_number) a))
   
 (print "Testing FFI...\n")
-(display (testffi 1))
+(println (show (gettype 1)))
+(println (show (gettype 'atomsarecool)))
+(print-number (/ 2 5))

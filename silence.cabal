@@ -14,6 +14,7 @@ executable silence
   main-is:           Main.hs
   hs-source-dirs:    src
   ghc-options:       -threaded -Wall -fwarn-tabs -fno-warn-unused-do-bind -O
+  other-modules:     Silence.FFI
   build-depends:     base,
                      integer-gmp,
                      ghc-prim,
@@ -24,3 +25,6 @@ executable silence
                      parsec,
                      optparse-applicative,
                      unix
+  c-sources:
+    cbits/Expression.c
+  include-dirs:      cbits
