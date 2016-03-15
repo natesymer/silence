@@ -1,5 +1,4 @@
-{-# LANGUAGE OverloadedStrings, ForeignFunctionInterface, ScopedTypeVariables #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE ForeignFunctionInterface, CPP, ScopedTypeVariables #-}
 
 module Silence.FFI
 (
@@ -15,6 +14,7 @@ import Silence.Expression
 import System.Posix.DynamicLinker hiding (Null)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
+import Foreign.Marshal.Utils
 import Foreign.Storable
 import Foreign.Ptr
 import Foreign.ForeignPtr
@@ -56,12 +56,15 @@ instance Storable Expression where
            <$> (peekPtrs 0 ptrs >>= peek)
            <*> (peekPtrs 1 ptrs >>= peek)
       6 -> Pointer <$> (peekPtrs 0 ptrs >>= peek)
-      _ -> return Null
-  poke ptr (Atom x) = withForeignPtr fptr $ \buf -> do
-      lenP <- mallocSingleton (CInt (fromIntegral len))
-      ptrs <- mallocN [castPtr buf,lenP]
+      _ -> error "FFI: invalid typecode"
+  poke ptr (Atom x) = do
+      lenP <- mallocSingleton $ CInt (fromIntegral len)
+      buf' <- mallocArray len'
+      withForeignPtr fptr $ \buf -> copyBytes buf' buf len'
+      ptrs <- mallocN [castPtr buf',lenP]
       pokeExpr ptr 0 2 ptrs
     where (fptr,_,len) = B.toForeignPtr x
+          len' = fromIntegral len
   poke ptr (Number r) = do
     numPtr <- mallocSingleton ((fromIntegral (numerator r)) :: Int64)
     denPtr <- mallocSingleton ((fromIntegral (denominator r)) :: Int64)
@@ -85,7 +88,7 @@ instance Storable Expression where
 
 mallocSingleton :: (Storable a) => a -> IO (Ptr ())
 mallocSingleton v = do
-  ptr <- mallocBytes $ sizeOf v
+  ptr <- malloc -- Bytes $ sizeOf v -- TODO: use 'malloc'
   poke ptr v
   return $ castPtr ptr
   
@@ -125,26 +128,23 @@ foreign import ccall "dynamic"
 foreign import ccall "wrapper"
   mkFunPtr :: CSig -> IO (FunPtr CSig)
   
+foreign import ccall "freeExpression"
+  freeExpression :: Ptr Expression -> IO ()
+
 -- |Wrap a C LISP function in a Haskell LISP function.
 -- the following rule holds: @'toCSig' '.' 'fromCSig' = 'id'@
 fromCSig :: CSig -> PrimFunc
 fromCSig cf es = liftIO $ bracket (withCArgs $ cf $ length es) free peek
   where withCArgs = bracket allocArgs freeArgs
         allocArgs = mapM (fmap castPtr . mallocSingleton) es >>= mallocN
-        freeArgs ptr = (peekArray (length es) ptr >>= go) >> free ptr
-          where go [] = return ()
-                go (x:xs) = free x >> go xs
+        freeArgs ptr = (peekArray (length es) ptr >>= mapM_ freeExpression) >> free ptr
 
 -- TODO: environment?
 -- |Wrap a Haskell LISP function in a C LISP function.
 toCSig :: PrimFunc -> CSig
-toCSig f = \count esptr -> do
-  eptrs <- peekArray count esptr
-  es <- mapM peek eptrs
-  expr <- fst <$> runStateT (runLispM $ f es) []
-  ptr <- malloc
-  poke ptr expr
-  return ptr
+toCSig f = \n args -> peekArray n args >>= mapM peek >>= runHLisp >>= castMallocS
+  where castMallocS = fmap castPtr . mallocSingleton
+        runHLisp args = evalStateT (runLispM $ f args) []
 
 -- |Load a foreign procedure.
 loadForeignProcedure :: FilePath -- |path of dylib to load

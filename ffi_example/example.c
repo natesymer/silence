@@ -19,6 +19,11 @@ Expression * print_number(int argc,Expression **argv) {
   return mkNull();
 }
 
+Expression * uppercase_atom(int argc,Expression **argv) {
+  const char *atom = "UPPERCASE_ATOM";
+  return mkAtom((char *)atom,strlen((char *)atom));
+}
+
 const char * showTypecode(uint8_t typecode) {
   switch (typecode) {
     case 0: return "atom"; break;

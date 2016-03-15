@@ -4,6 +4,7 @@
 #include <string.h>
 
 #define ALLOC_SINGLETON(t,name,v) t *name = (t *)malloc(sizeof(t)); *name = (v);
+#define COPY_SINGLETON(t,dest,src) { ALLOC_SINGLETON(t,tmp,*((t *)(src))); *((t *)dest) = *tmp; }
 
 // allocate a general expression
 Expression * mallocExpr(uint8_t tc,uint8_t nptrs) {
@@ -14,19 +15,49 @@ Expression * mallocExpr(uint8_t tc,uint8_t nptrs) {
   return e;
 }
 
-Expression * copyExpr(Expression *e) {
-  Expression *cpy = mallocExpr(e->typecode,e->num_ptrs);
-  
-  // TODO: write copying logic
-  
-  return cpy;
-}
+// Expression * copyExpr(Expression *e) {
+//   Expression *cpy = mallocExpr(e->typecode,e->num_ptrs);
+//
+//   switch (e->typecode) {
+//     case 0: {
+//       int len = *((int *)e->ptrs[1]);
+//       COPY_SINGLETON(int,cpy->ptrs[1],e->ptrs[1]);
+//       cpy->ptrs[0] = (char *)malloc(sizeof(char)*len);
+//       strncpy((char *)(cpy->ptrs[0]),(char *)(e->ptrs[0]),len);
+//       break;
+//     }
+//     case 1: {
+//       COPY_SINGLETON(int64_t,cpy->ptrs[0],e->ptrs[0]);
+//       COPY_SINGLETON(int64_t,cpy->ptrs[1],e->ptrs[1]);
+//       break;
+//     }
+//     case 2: {
+//       COPY_SINGLETON(uint8_t,cpy->ptrs[0],e->ptrs[0]);
+//       break;
+//     }
+//     case 3: {
+//       COPY_SINGLETON(uint8_t,cpy->ptrs[0],e->ptrs[0]);
+//       COPY_SINGLETON(uint8_t,cpy->ptrs[1],e->ptrs[1]);
+//       COPY_SINGLETON(CSig,cpy->ptrs[2],e->ptrs[2]);
+//       break;
+//     }
+//     case 5: {
+//       COPY_SINGLETON(Expression *,cpy->ptrs[0],e->ptrs[0]);
+//       COPY_SINGLETON(Expression *,cpy->ptrs[1],e->ptrs[1]);
+//       break;
+//     }
+//     case 6: {
+//       COPY_SINGLETON(void *,cpy->ptrs[0],e->ptrs[0]);
+//       break;
+//     }
+//   }
+//
+//   return cpy;
+// }
 
 // free any expression
 void freeExpression(Expression *e) {
-  for (uint8_t i = 0; i < e->num_ptrs; i++) {
-    free(e->ptrs[i]);
-  }
+  for (uint8_t i = 0; i < e->num_ptrs; i++) free(e->ptrs[i]);
   free(e->ptrs);
   free(e);
   e = NULL;
