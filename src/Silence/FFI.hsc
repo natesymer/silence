@@ -30,6 +30,13 @@ import Data.Word
 import Data.Int
 import qualified Data.ByteString.Internal as B
 
+{-
+TODO:
+1. Finalize Cell & c-representations of expressions.
+  1. Maybe this includes writing sub-structs to add typing
+     to the nebulous "ptrs" field...
+-}
+
 instance Storable Expression where
   sizeOf    _ = #const sizeof(Expression)
   alignment _ = alignment (undefined :: Ptr ())
@@ -40,7 +47,7 @@ instance Storable Expression where
       0 -> do
         buf <- peekPtrs 0 ptrs >>= newForeignPtr_
         (CInt len) <- peekPtrs 1 ptrs >>= peek
-        return $ Atom $ B.fromForeignPtr buf 0 (fromIntegral len)
+        return $ Atom $ B.lowercase $ B.fromForeignPtr buf 0 (fromIntegral len)
       1 -> do
         (num :: Int64) <- peekPtrs 0 ptrs >>= peek
         (denom :: Int64) <- peekPtrs 1 ptrs >>= peek
@@ -58,18 +65,16 @@ instance Storable Expression where
       6 -> Pointer <$> (peekPtrs 0 ptrs >>= peek)
       _ -> error "FFI: invalid typecode"
   poke ptr (Atom x) = do
-      lenP <- mallocSingleton $ CInt (fromIntegral len)
+      lenP <- mallocSingleton $ CInt $ fromIntegral len
       buf' <- mallocArray len'
       withForeignPtr fptr $ \buf -> copyBytes buf' buf len'
-      ptrs <- mallocN [castPtr buf',lenP]
-      pokeExpr ptr 0 2 ptrs
+      pokeExpr ptr 0 2 =<< mallocN [castPtr buf',lenP]
     where (fptr,_,len) = B.toForeignPtr x
           len' = fromIntegral len
   poke ptr (Number r) = do
     numPtr <- mallocSingleton ((fromIntegral (numerator r)) :: Int64)
     denPtr <- mallocSingleton ((fromIntegral (denominator r)) :: Int64)
-    ptrs <- mallocN [numPtr,denPtr]
-    pokeExpr ptr 1 2 ptrs
+    pokeExpr ptr 1 2 =<< mallocN [numPtr,denPtr]
   poke ptr (Bool True) = pokeExpr ptr 2 1 =<< mallocN . pure =<< mallocSingleton (1 :: Word8)
   poke ptr (Bool False) = pokeExpr ptr 2 1 =<< mallocN . pure =<< mallocSingleton (0 :: Word8)
   poke ptr (Procedure e a b) = do

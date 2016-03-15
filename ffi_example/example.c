@@ -20,7 +20,7 @@ Expression * print_number(int argc,Expression **argv) {
 }
 
 Expression * uppercase_atom(int argc,Expression **argv) {
-  const char *atom = "UPPERCASE_ATOM";
+  const char *atom = "UPPERCASE-ATOM-BUG";
   return mkAtom((char *)atom,strlen((char *)atom));
 }
 
