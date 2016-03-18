@@ -1,15 +1,44 @@
+#ifndef EXPRESSION_H
+#define EXPRESSION_H
+
 #include <stdio.h>
 #include <stdlib.h>
 
 typedef struct Expression {
   uint8_t typecode;
-  uint8_t num_ptrs;
-  void **ptrs;
+  void *memory;
 } Expression;
 
 typedef Expression * (*CSig)(int,Expression **);
+typedef void (*PtrFinalizer)(void *);
 
-Expression * mallocExpr(uint8_t tc,uint8_t nptrs);
+struct Atom {
+  char *buf;
+  int len;
+};
+
+struct Number {
+  int64_t numerator;
+  int64_t denominator;
+};
+
+struct Procedure {
+  uint8_t evalArgs;
+  int8_t arity;
+  CSig body;
+};
+
+struct Cell {
+  Expression *car;
+  Expression *cdr;
+};
+
+struct Pointer {
+  void *ptr;
+  PtrFinalizer finalizer;
+};
+
+Expression * mallocExpr(uint8_t tc,void *mem);
 void freeExpression(Expression *e);
 
 Expression * mkAtom(char *str,int len);
@@ -23,11 +52,12 @@ int numberParts(Expression *e, int64_t *num, int64_t *denom);
 int numberAsDouble(Expression *e, double *out);
 int numberAsInt(Expression *e, int *out);
 
-Expression * mkBool(uint8_t v);
+Expression * mkBoolTrue();
+Expression * mkBoolFalse();
 int isBool(Expression *e);
 int isTruthy(Expression *e);
 
-Expression * mkProcedure(uint8_t evalArgs,uint8_t arity, CSig body);
+Expression * mkProcedure(uint8_t evalArgs,int8_t arity, CSig body);
 int isProcedure(Expression *e);
 
 Expression * mkNull();
@@ -35,9 +65,15 @@ int isNull(Expression *e);
 
 Expression * mkCell(Expression *a,Expression *d);
 int isCell(Expression *e);
-int car(Expression *cell,Expression **out);
-int cdr(Expression *cell,Expression **out);
+Expression * car(Expression *cell);
+Expression * cdr(Expression *cell);
 
-Expression * mkPointer(void *ptr);
+int listLength(Expression *cell, int (*pred)(Expression *), int *out);
+int toString(Expression *cell, char **out);
+
+Expression * mkPointer(void *ptr,PtrFinalizer f);
 int isPointer(Expression *e);
-int getPointer(Expression *e,void **out);
+void * getPointer(Expression *e);
+void finalizePointer(Expression *e);
+
+#endif

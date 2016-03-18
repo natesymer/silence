@@ -8,17 +8,17 @@ module Silence.FFI
 where
   
 #include "Expression.h"
+#include <stdalign.h>
   
 import Silence.Expression
   
 import System.Posix.DynamicLinker hiding (Null)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
-import Foreign.Marshal.Utils
 import Foreign.Storable
 import Foreign.Ptr
-import Foreign.ForeignPtr
 import Foreign.C.Types
+import Foreign.ForeignPtr
 
 import Control.Monad.IO.Class
 import Control.Monad.State.Strict
@@ -28,112 +28,142 @@ import Control.Exception.Base
 import Data.Ratio
 import Data.Word
 import Data.Int
-import qualified Data.ByteString.Internal as B
+import qualified Data.ByteString as B
+import Data.ByteString.Internal (ByteString(..))
 
 {-
 TODO:
-1. Finalize Cell & c-representations of expressions.
-  1. Maybe this includes writing sub-structs to add typing
-     to the nebulous "ptrs" field...
+1. Finish Cell-to-CharBuffer C function (and char* to cell function)
+2. Rethink dlopening in regards to pointers to C functions (expose dlopen & DL via the Pointer exprtype?)
 -}
+
+data CAtom = CAtom (Ptr CChar) CInt
+data CNumber = CNumber Int64 Int64
+data CProcedure = CProcedure Word8 Int8 (FunPtr CSig)
+data CCell = CCell (Ptr Expression) (Ptr Expression)
+data CPointer = CPointer (Ptr ()) (FunPtr PtrFinalizer)
+
+instance Storable CAtom where
+  sizeOf    _ = #const sizeof(struct Atom)
+  alignment _ = #const alignof(struct Atom)
+  peek ptr = CAtom <$> ((#peek struct Atom, buf) ptr) <*> ((#peek struct Atom, len) ptr)
+  poke ptr (CAtom cstr len) = ((#poke struct Atom, buf) ptr cstr) >> ((#poke struct Atom, len) ptr len)
+    
+instance Storable CNumber where
+  sizeOf _ = #const sizeof(struct Number)
+  alignment _ = #const alignof(struct Number)
+  peek ptr = CNumber <$> ((#peek struct Number, numerator) ptr) <*> ((#peek struct Number, denominator) ptr)
+  poke ptr (CNumber n d) = ((#poke struct Number, numerator) ptr n) >> ((#poke struct Number, denominator) ptr d)
+  
+instance Storable CCell where
+  sizeOf _ = #const sizeof(struct Cell)
+  alignment _ = #const alignof(struct Cell)
+  peek ptr = CCell <$> ((#peek struct Cell,car) ptr) <*> ((#peek struct Cell, cdr) ptr)
+  poke ptr (CCell a b) = ((#poke struct Cell,car) ptr a) >> ((#poke struct Cell,cdr) ptr b)
+  
+instance Storable CProcedure where
+  sizeOf _ = #const sizeof(struct Procedure)
+  alignment _ = #const alignof(struct Procedure)
+  peek ptr = CProcedure
+              <$> ((#peek struct Procedure,evalArgs) ptr)
+              <*> ((#peek struct Procedure,arity) ptr)
+              <*> ((#peek struct Procedure,body) ptr)
+  poke ptr (CProcedure ea a bdy) = do
+    ((#poke struct Procedure,evalArgs) ptr ea)
+    ((#poke struct Procedure,arity) ptr a)
+    ((#poke struct Procedure,body) ptr bdy)
+
+instance Storable CPointer where
+  sizeOf _ = #const sizeof(struct Pointer)
+  alignment _ = #const alignof(struct Pointer)
+  peek ptr = CPointer <$> ((#peek struct Pointer, ptr) ptr) <*> ((#peek struct Pointer, finalizer) ptr)
+  poke ptr (CPointer p f) = ((#poke struct Pointer, ptr) ptr p) >> ((#poke struct Pointer, finalizer) ptr f)
 
 instance Storable Expression where
   sizeOf    _ = #const sizeof(Expression)
-  alignment _ = alignment (undefined :: Ptr ())
+  alignment _ = #const alignof(Expression)
   peek ptr = do
-    (typecode,_,ptrs) <- peekExpr ptr
-    -- TODO: proper bounds checking for @ptrs@
-    case typecode of
+    (tc,eptr) <- peekExpr ptr
+    case tc of
       0 -> do
-        buf <- peekPtrs 0 ptrs >>= newForeignPtr_
-        (CInt len) <- peekPtrs 1 ptrs >>= peek
-        return $ Atom $ B.lowercase $ B.fromForeignPtr buf 0 (fromIntegral len)
+        (CAtom buf (CInt len)) <- peek ((castPtr eptr) :: Ptr CAtom)
+        Atom <$> B.packCStringLen (buf,fromIntegral len)
       1 -> do
-        (num :: Int64) <- peekPtrs 0 ptrs >>= peek
-        (denom :: Int64) <- peekPtrs 1 ptrs >>= peek
-        return $ Number $ (toInteger num) % (toInteger denom)
-      2 -> Bool <$> (peekPtrs 0 ptrs >>= peekByteBool)
-      3 -> do
-        evalArgs <- peekPtrs 0 ptrs >>= peekByteBool
-        (arity :: Word8) <- peekPtrs 1 ptrs >>= peek
-        f <- fromCSig . mkFun <$> (peekPtrs 2 ptrs >>= peek)
-        return $ Procedure evalArgs (fromIntegral arity) f
-      4 -> return Null
-      5 -> Cell
-           <$> (peekPtrs 0 ptrs >>= peek)
-           <*> (peekPtrs 1 ptrs >>= peek)
-      6 -> Pointer <$> (peekPtrs 0 ptrs >>= peek)
-      _ -> error "FFI: invalid typecode"
-  poke ptr (Atom x) = do
-      lenP <- mallocSingleton $ CInt $ fromIntegral len
-      buf' <- mallocArray len'
-      withForeignPtr fptr $ \buf -> copyBytes buf' buf len'
-      pokeExpr ptr 0 2 =<< mallocN [castPtr buf',lenP]
-    where (fptr,_,len) = B.toForeignPtr x
-          len' = fromIntegral len
-  poke ptr (Number r) = do
-    numPtr <- mallocSingleton ((fromIntegral (numerator r)) :: Int64)
-    denPtr <- mallocSingleton ((fromIntegral (denominator r)) :: Int64)
-    pokeExpr ptr 1 2 =<< mallocN [numPtr,denPtr]
-  poke ptr (Bool True) = pokeExpr ptr 2 1 =<< mallocN . pure =<< mallocSingleton (1 :: Word8)
-  poke ptr (Bool False) = pokeExpr ptr 2 1 =<< mallocN . pure =<< mallocSingleton (0 :: Word8)
+        (CNumber n d) <- peek ((castPtr eptr) :: Ptr CNumber)
+        return $ Number $ (toInteger n) % (toInteger d)
+      2 -> return $ Bool True
+      3 -> return $ Bool False
+      4 -> do
+        (CProcedure ea arity bdy) <- peek ((castPtr eptr) :: Ptr CProcedure)
+        return $ Procedure (ea == 1) (fromIntegral arity) (fromCSig $ unwrapCSig bdy)
+      5 -> return Null
+      6 -> do
+        (CCell a b) <- peek ((castPtr eptr) :: Ptr CCell)
+        Cell <$> (peek a) <*> (peek b)
+      7 -> do
+        (CPointer p f) <- peek ((castPtr eptr) :: Ptr CPointer)
+        return $ Pointer p (unwrapFinalizer f)
+      _ -> error "FFI: invalid C Expression."
+  poke ptr (Atom (PS fp o l)) = do
+    (p :: Ptr CChar) <- mallocBytes l
+    withForeignPtr fp $ \fp' -> copyArray p (fp' `plusPtr` o) l
+    pokeExpr ptr 0 $ CAtom p (fromIntegral l)
+  poke ptr (Number r) =
+    pokeExpr ptr 1 $ CNumber (fromIntegral $ numerator r) (fromIntegral $ denominator r)
+  poke ptr (Bool True) = pokeExpr ptr 2 nullPtr
+  poke ptr (Bool False) = pokeExpr ptr 3 nullPtr
   poke ptr (Procedure e a b) = do
-    e' <- mallocSingleton ((if e then 1 else 0) :: Word8)
-    a' <- mallocSingleton ((fromIntegral a) :: Word8)
-    b' <- mkFunPtr (toCSig b) >>= mallocSingleton
-    pokeExpr ptr 3 3 =<< mallocN [e',a',b']
-  poke ptr Null = pokeExpr ptr 4 0 nullPtr
+    cs <- wrapCSig $ toCSig b
+    pokeExpr ptr 3 $ CProcedure ((if e then 1 else 0) :: Word8) (fromIntegral a) cs
+  poke ptr Null = pokeExpr ptr 5 nullPtr
   poke ptr (Cell a b) = do
     a' <- mallocSingleton a
     b' <- mallocSingleton b
-    pokeExpr ptr 5 2 =<< mallocN [a',b']
-  poke ptr (Pointer p) = do
-    p' <- mallocSingleton p
-    pokeExpr ptr 6 1 =<< mallocN [p']
-
+    pokeExpr ptr 6 (CCell (castPtr a') (castPtr b'))
+  poke ptr (Pointer p fin) = wrapFinalizer fin >>= pokeExpr ptr 7 . CPointer p
+    
 mallocSingleton :: (Storable a) => a -> IO (Ptr ())
 mallocSingleton v = do
-  ptr <- malloc -- Bytes $ sizeOf v -- TODO: use 'malloc'
+  ptr <- malloc
   poke ptr v
   return $ castPtr ptr
-  
+
 mallocN :: (Storable a) => [a] -> IO (Ptr a)
+mallocN [] = return nullPtr
 mallocN xs = do
   ptrs <- mallocBytes ((length xs)*(sizeOf (undefined :: Ptr ())))
   pokeArray ptrs xs
   return ptrs
   
-pokeExpr :: Ptr Expression -> Word8 -> Word8 -> Ptr (Ptr ()) -> IO ()
-pokeExpr ptr typecode numPtrs ptrs = do
+pokeExpr :: (Storable a) => Ptr Expression -> Word8 -> a -> IO ()
+pokeExpr ptr typecode memory = do
+  memory' <- mallocSingleton memory
   (#poke Expression, typecode) ptr typecode
-  (#poke Expression, num_ptrs) ptr numPtrs
-  (#poke Expression, ptrs) ptr ptrs
+  (#poke Expression, memory) ptr memory'
 
-peekExpr :: Ptr Expression -> IO (Word8,Word8,Ptr (Ptr ()))
+peekExpr :: Ptr Expression -> IO (Word8,Ptr ())
 peekExpr ptr = do
-  typecode <- (#peek Expression, typecode) ptr
-  numPtrs  <- (#peek Expression, num_ptrs) ptr
-  ptrs     <- (#peek Expression, ptrs) ptr
-  return (typecode,numPtrs,ptrs)
-  
-peekPtrs :: (Storable a) => Int -> Ptr (Ptr ()) -> IO (Ptr a)
-peekPtrs idx ptrs = castPtr <$> peekByteOff ptrs (idx * (sizeOf (undefined :: Ptr ())))
-  
-peekByteBool :: Ptr Word8 -> IO Bool
-peekByteBool = fmap f . peek
-  where f 0 = False; f _ = True
+  tc <- ((#peek Expression, typecode) ptr)
+  memptr <- ((#peek Expression, memory) ptr)
+  return (tc,memptr)
 
 -- |C LISP function signature. Returned 'Expression' pointer
 -- must be malloc'd (seek 'fromCSig' for how the pointer is handled.)
 type CSig = Int -> Ptr (Ptr Expression) -> IO (Ptr Expression)
 
 foreign import ccall "dynamic"
-  mkFun :: FunPtr (CSig) -> CSig
+  unwrapFinalizer :: FunPtr (PtrFinalizer) -> PtrFinalizer
   
 foreign import ccall "wrapper"
-  mkFunPtr :: CSig -> IO (FunPtr CSig)
+  wrapFinalizer :: PtrFinalizer -> IO (FunPtr PtrFinalizer)
+
+foreign import ccall "dynamic"
+  unwrapCSig :: FunPtr (CSig) -> CSig
   
-foreign import ccall "freeExpression"
+foreign import ccall "wrapper"
+  wrapCSig :: CSig -> IO (FunPtr CSig)
+  
+foreign import ccall
   freeExpression :: Ptr Expression -> IO ()
 
 -- |Wrap a C LISP function in a Haskell LISP function.
@@ -147,9 +177,9 @@ fromCSig cf es = liftIO $ bracket (withCArgs $ cf $ length es) free peek
 -- TODO: environment?
 -- |Wrap a Haskell LISP function in a C LISP function.
 toCSig :: PrimFunc -> CSig
-toCSig f = \n args -> peekArray n args >>= mapM peek >>= runHLisp >>= castMallocS
+toCSig f n args = peekArray n args >>= mapM peek >>= runHLisp >>= castMallocS
   where castMallocS = fmap castPtr . mallocSingleton
-        runHLisp args = evalStateT (runLispM $ f args) []
+        runHLisp hargs = evalStateT (runLispM $ f hargs) []
 
 -- |Load a foreign procedure.
 loadForeignProcedure :: FilePath -- |path of dylib to load
@@ -157,7 +187,7 @@ loadForeignProcedure :: FilePath -- |path of dylib to load
                      -> PrimFunc
 loadForeignProcedure file func as = do
   dl <- liftIO $ dlopen file [RTLD_NOW]
-  f <- fromCSig . mkFun <$> (liftIO $ dlsym dl func)
+  f <- fromCSig . unwrapCSig <$> (liftIO $ dlsym dl func)
   res <- f as
   liftIO $ dlclose dl
   return res

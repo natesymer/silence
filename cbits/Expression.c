@@ -7,11 +7,10 @@
 #define COPY_SINGLETON(t,dest,src) { ALLOC_SINGLETON(t,tmp,*((t *)(src))); *((t *)dest) = *tmp; }
 
 // allocate a general expression
-Expression * mallocExpr(uint8_t tc,uint8_t nptrs) {
+Expression * mallocExpr(uint8_t tc,void *mem) {
   Expression *e = malloc(sizeof(Expression));
   e->typecode = tc;
-  e->num_ptrs = nptrs;
-  e->ptrs = (void **)malloc(sizeof(void *)*nptrs);
+  e->memory = mem;
   return e;
 }
 
@@ -57,181 +56,163 @@ Expression * mallocExpr(uint8_t tc,uint8_t nptrs) {
 
 // free any expression
 void freeExpression(Expression *e) {
-  for (uint8_t i = 0; i < e->num_ptrs; i++) free(e->ptrs[i]);
-  free(e->ptrs);
+  if (isCell(e)) {
+    freeExpression(car(e));
+    freeExpression(cdr(e));
+  } else if (isPointer(e)) {
+    finalizePointer(e);
+  } else if (isAtom(e)) {
+    struct Atom *a = (struct Atom *)(e->memory);
+    free(a->buf);
+  }
+  
+  free(e->memory);
   free(e);
-  e = NULL;
 }
 
 // ATOM
 
 Expression * mkAtom(char *str,int len) {
-  char *buffer = (char *)malloc(sizeof(char)*len);
-  strncpy(buffer,str,len);
-  
-  ALLOC_SINGLETON(int,lenbuf,len);
-
-  Expression *atom = mallocExpr(0,2);
-  atom->ptrs[0] = buffer;
-  atom->ptrs[1] = lenbuf;
-  return atom;
+  struct Atom *a = (struct Atom *)malloc(sizeof(struct Atom));
+  a->len = len;
+  a->buf = (char *)malloc(sizeof(char)*len);
+  strncpy(a->buf,str,len);
+  return mallocExpr(0,a);
 }
 
 int isAtom(Expression *e) {
   return e->typecode == 0;
 }
 
-int atomParts(Expression *e, char **ptr, int *len) {
-  if (!isAtom(e)) return -1;
-  else {
-    ptr = e->ptrs[0];
-    len = e->ptrs[1];
-    return 0;
-  }
-}
-
 // NUMBER
 
 Expression * mkNumber(int64_t num,int64_t den) {
-  ALLOC_SINGLETON(int64_t,numbuf,num);
-  ALLOC_SINGLETON(int64_t,denbuf,den);
-  Expression *e = mallocExpr(1,2);
-  e->ptrs[0] = numbuf;
-  e->ptrs[1] = denbuf;
-  return e;
+  struct Number *n = (struct Number *)malloc(sizeof(struct Number));
+  n->numerator = num;
+  n->denominator = den;
+  return mallocExpr(1,n);
 }
 
 int isNumber(Expression *e) {
   return e->typecode == 1;
 }
 
-int numberParts(Expression *e, int64_t *nump, int64_t *denomp) {
-  if (!isNumber(e)) return -1;
-  else {
-    *nump = *((int64_t *)e->ptrs[0]);
-    *denomp = *((int64_t *)e->ptrs[1]);
-    return 0;
-  } 
-}
-
-int numberAsDouble(Expression *e, double *out) {
-  int64_t n,d;
-  if (!numberParts(e,&n,&d)) return -1;
-  else {
-    *out = n/d;
-    return 0;
-  }
-}
-
-// returns -1 if not an integer, 0 if an integer
-int numberAsInt(Expression *e, int *out) {
-  int64_t n,d;
-  if (!numberParts(e,&n,&d)) return -1;
-  else {
-    if (d != 1) return -1;
-    else {
-      *out = n;
-      return 0;
-    }
-  }
-}
-
 // BOOL
 
-Expression * mkBool(uint8_t v) {
-  ALLOC_SINGLETON(uint8_t,boolbuf,v);
-  Expression *e = mallocExpr(2,1);
-  e->ptrs[0] = boolbuf;
-  return e;
+Expression * mkBoolTrue() {
+  return mallocExpr(2,NULL);
 }
 
-int isBool(Expression *e) {
-  return e->typecode == 2;
+Expression * mkBoolFalse() {
+  return mallocExpr(3,NULL);
 }
+
+int isBool(Expression *e) { return e->typecode == 2 || e->typecode == 3; }
 
 int isTruthy(Expression *e) {
   if (!isBool(e)) return 1;
-  else if ((*((uint8_t *)(e->ptrs[0]))) != 0) return 1;
+  else if (e->typecode == 2) return 1;
   else return 0;
 }
 
 // PROCEDURE
 
-Expression * mkProcedure(uint8_t evalArgs,uint8_t arity, CSig body) {
-  ALLOC_SINGLETON(uint8_t,eabuf,evalArgs);
-  ALLOC_SINGLETON(uint8_t,abuf,arity);
-  ALLOC_SINGLETON(CSig,bbuf,body);
-  Expression *e = mallocExpr(3,3);
-  e->ptrs[0] = eabuf;
-  e->ptrs[1] = abuf;
-  e->ptrs[2] = bbuf;
-  return e;
+// TODO write @apply@? maybe import it?
+
+Expression * mkProcedure(uint8_t evalArgs,int8_t arity, CSig body) {
+  struct Procedure *p = (struct Procedure *)malloc(sizeof(struct Procedure));
+  p->evalArgs = evalArgs;
+  p->arity = arity;
+  p->body = body;
+  return mallocExpr(4,p);
 }
 
-// TODO write @apply@
-int isProcedure(Expression *e) {
-  return e->typecode == 3;
-}
+int isProcedure(Expression *e) { return e->typecode == 4; }
 
 // NULL
 
 Expression * mkNull() {
-  return mallocExpr(4,0);
+  return mallocExpr(5,NULL);
 }
 
-int isNull(Expression *e) {
-  return e->typecode == 4;
-}
+int isNull(Expression *e) { return e->typecode == 5; }
 
 // CELL
 
 Expression * mkCell(Expression *a,Expression *d) {
-  ALLOC_SINGLETON(Expression *,carbuf,a);
-  ALLOC_SINGLETON(Expression *,cdrbuf,d);
-  Expression *e = mallocExpr(5,2);
-  e->ptrs[0] = carbuf;
-  e->ptrs[1] = cdrbuf;
-  return e;
+  struct Cell *c = (struct Cell *)malloc(sizeof(struct Cell));
+  c->car = a;
+  c->cdr = d;
+  return mallocExpr(6,c);
 }
 
-int isCell(Expression *e) {
-  return e->typecode == 5;
+int isCell(Expression *e) { return e->typecode == 6; }
+
+Expression * car(Expression *cell) {
+  return (((struct Cell *)(cell->memory))->car);
 }
 
-int car(Expression *cell,Expression **out) {
-  if (!isCell(cell)) return -1;
-  else {
-    *out = *((Expression **)(cell->ptrs[0]));
-    return 0;
+Expression * cdr(Expression *cell) {
+  return (((struct Cell *)(cell->memory))->cdr);
+}
+
+int listLength(Expression *cell, int (*pred)(Expression *), int *out) {
+  if (isNull(cell)) return 0;
+  else if (isCell(cell)) {
+    Expression *ep = cdr(cell);
+    Expression *v = car(cell);
+    int res = (*pred)(v);
+    if (ep && v && res) {
+      (*out)++;
+      return listLength(ep,pred,out);
+    }
+  }
+  *out = 0;
+  return -1;
+}
+
+int toString(Expression *cell, char **out) {
+  int len = 0;
+  if (listLength(cell,&isNumber,&len) == -1) return -1;
+  
+  char *buf = malloc(sizeof(char)*len);
+  Expression *x = cell;
+  int idx = 0;
+  
+  while (1) {
+    Expression *a, *b;
+    if ((b = cdr(x)) && (a = car(x))) {
+      if (isNull(b)) {
+        buf[len] = '\0';
+        return 0;
+      } else {
+        buf[idx++] = (char)a;
+        x = b;
+      }
+    } else {
+      return -1;
+      break;
+    }
   }
 }
 
-int cdr(Expression *cell,Expression **out) {
-  if (!isCell(cell)) return -1;
-  else {
-    *out = *((Expression **)(cell->ptrs[1]));
-    return 0;
-  }
-}
 
 // POINTER
 
-Expression * mkPointer(void *ptr) {
-  ALLOC_SINGLETON(void *,ptrbuf,ptr);
-  
-  Expression *e = mallocExpr(6,1);
-  e->ptrs[0] = ptrbuf;
-  return e;
+Expression * mkPointer(void *ptr,PtrFinalizer f) {
+  struct Pointer *p = (struct Pointer *)malloc(sizeof(struct Pointer));
+  p->ptr = ptr;
+  p->finalizer = f;
+  return mallocExpr(7,p);
 }
 
-int isPointer(Expression *e) {
-  return e->typecode == 6;
+int isPointer(Expression *e) { return e->typecode == 7; }
+
+void * getPointer(Expression *e) {
+  return ((struct Pointer *)e->memory)->ptr;
 }
 
-int getPointer(Expression *e,void **out) {
-  if (!isPointer(e)) return -1;
-  else {
-    *out = *((void **)(e->ptrs[0]));
-    return 0;
-  }
-}
+void finalizePointer(Expression *e) {
+  struct Pointer *p = (struct Pointer *)e->memory;
+  (*(p->finalizer))(p->ptr);
+} 

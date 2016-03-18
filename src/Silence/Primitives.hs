@@ -85,7 +85,8 @@ primitives = H.fromList [
   mkProc "quote"       False 1 $ const $ return . head,
   mkProc "import"      True  1 $ stringArg $ (=<<) (evaluate . parseSilence) . liftIO . B.readFile,
   mkProc "begin"       True  (-1) $ const $ return . last,
-  mkProc "foreign"     True  2 foreignE
+  mkProc "foreign"     True  2 foreignE,
+  mkProc "free"        True  1 freeE
   ]
 
 -- TODO: make error handling not require a parameter to be passed
@@ -109,6 +110,10 @@ foreignE n [fp,Atom funcname] = return $ Procedure True (-1) $ fromMaybe (invali
   fp' <- fromLispStr fp
   return $ loadForeignProcedure fp' (B.unpack funcname)
 foreignE n _ = invalidForm n
+
+freeE :: String -> PrimFunc
+freeE _ [Pointer p fin] = lispVoid $ liftIO $ fin p
+freeE n _ = invalidForm n
 
 unary :: (Expression -> LispM Expression) -> String -> PrimFunc
 unary f n = maybe (invalidForm n) f . fmap fst . uncons

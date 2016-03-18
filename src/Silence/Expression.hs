@@ -3,6 +3,7 @@ module Silence.Expression
 (
   Scope,
   PrimFunc,
+  PtrFinalizer,
   Expression(..),
   LispM(..),
   -- * Evaluation
@@ -58,6 +59,7 @@ newtype LispM a = LispM {
 
 type Scope = HashMap ByteString Expression
 type PrimFunc = [Expression] -> LispM Expression -- TODO: Make this a state action: [Expression] -> [Scope] -> IO (Expression,[Scope])
+type PtrFinalizer = Ptr () -> IO ()
 
 -- TODO: storable/ptr instance
 -- |A lisp expression.
@@ -70,7 +72,7 @@ data Expression = Atom ByteString
                     PrimFunc -- state action
                 | Null
                 | Cell Expression Expression
-                | Pointer (Ptr ())
+                | Pointer (Ptr ()) PtrFinalizer
 
 instance Show Expression where
   show = B.unpack . showExpr
@@ -81,7 +83,7 @@ instance Eq Expression where
   (Bool a) == (Bool b) = a == b
   Null == Null = True
   (Cell a as) == (Cell b bs) = a == b && as == bs
-  (Pointer a) == (Pointer b) = a == b
+  (Pointer a _) == (Pointer b _) = a == b
   _ == _ = False
 
 showExpr :: Expression -> ByteString
@@ -99,7 +101,7 @@ showExpr c@(Cell _ _) = "(" <> f "" c <> ")"
         f acc (Cell a b@(Cell _ _)) = f (acc <> showExpr a <> " ") b
         f acc (Cell a b) = acc <> showExpr a <> " . " <> showExpr b
         f _ _ = error "invalid cons list."
-showExpr (Pointer p) = B.pack $ show p
+showExpr (Pointer p _) = B.pack $ show p
 
 -- |Convert a rational into either an 'Integer' or a 'Double'        
 fromNumber :: Rational -> Either Integer Double
