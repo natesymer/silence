@@ -2,6 +2,7 @@
 
 module Silence.FFI
 (
+  loadForeignCode,
   loadForeignProcedure,
   Expression()
 )
@@ -12,12 +13,14 @@ where
   
 import Silence.Expression
   
-import System.Posix.DynamicLinker hiding (Null)
+-- import System.Posix.DynamicLinker hiding (Null)
+import System.Posix.DynamicLinker.Prim hiding (Null)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
 import Foreign.Storable
 import Foreign.Ptr
 import Foreign.C.Types
+import Foreign.C.String
 import Foreign.ForeignPtr
 
 import Control.Monad.IO.Class
@@ -182,12 +185,21 @@ toCSig f n args = peekArray n args >>= mapM peek >>= runHLisp >>= castMallocS
         runHLisp hargs = evalStateT (runLispM $ f hargs) []
 
 -- |Load a foreign procedure.
-loadForeignProcedure :: FilePath -- |path of dylib to load
+loadForeignProcedure :: Ptr () -- |pointer to dynamically linked code
                      -> String -- |symbol str of function to call
-                     -> PrimFunc
-loadForeignProcedure file func as = do
-  dl <- liftIO $ dlopen file [RTLD_NOW]
-  f <- fromCSig . unwrapCSig <$> (liftIO $ dlsym dl func)
-  res <- f as
-  liftIO $ dlclose dl
-  return res
+                     -> IO (Either String PrimFunc)
+loadForeignProcedure ptr sym = withCString sym $ \sym' -> do
+  c_dlerror -- clear error
+  func <- liftIO $ c_dlsym ptr sym'
+  err <- c_dlerror
+  if err == nullPtr
+    then return $ Right $ fromCSig $ unwrapCSig func
+    else Left <$> peekCString err
+
+loadForeignCode :: FilePath -> IO (Either String Expression)
+loadForeignCode fp = withCString fp $ \fp' -> do
+  c_dlerror -- clear error
+  ptr <- c_dlopen fp' 2 -- RTLD_NOW
+  if ptr == nullPtr
+    then c_dlerror >>= fmap Left . peekCString
+    else return $ Right $ Pointer ptr (fmap void c_dlclose)

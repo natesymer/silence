@@ -85,6 +85,7 @@ primitives = H.fromList [
   mkProc "quote"       False 1 $ const $ return . head,
   mkProc "import"      True  1 $ stringArg $ (=<<) (evaluate . parseSilence) . liftIO . B.readFile,
   mkProc "begin"       True  (-1) $ const $ return . last,
+  mkProc "dlopen"      True  1 dlopenE,
   mkProc "foreign"     True  2 foreignE,
   mkProc "free"        True  1 freeE
   ]
@@ -105,10 +106,14 @@ letParentBangE :: String -> PrimFunc
 letParentBangE n as = get >>= maybe (error "empty stack") (uncurry f) . uncons
   where f e es = put es *> letBangE n as <* (get >>= put . (:) e)
 
+dlopenE :: String -> PrimFunc
+dlopenE n [s] = liftIO $ loadForeignCode path >>= either error return
+  where path = fromMaybe (invalidForm n) $ fromLispStr s
+dlopenE n _ = invalidForm n
+
 foreignE :: String -> PrimFunc
-foreignE n [fp,Atom funcname] = return $ Procedure True (-1) $ fromMaybe (invalidForm n) $ do
-  fp' <- fromLispStr fp
-  return $ loadForeignProcedure fp' (B.unpack funcname)
+foreignE n [Pointer p _,fn] = liftIO $ loadForeignProcedure p funcname >>= either error (return . Procedure True (-1))
+  where funcname = fromMaybe (invalidForm n) $ fromLispStr fn
 foreignE n _ = invalidForm n
 
 freeE :: String -> PrimFunc
