@@ -3,9 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define ALLOC_SINGLETON(t,name,v) t *name = (t *)malloc(sizeof(t)); *name = (v);
-#define COPY_SINGLETON(t,dest,src) { ALLOC_SINGLETON(t,tmp,*((t *)(src))); *((t *)dest) = *tmp; }
-
 // allocate a general expression
 Expression * mallocExpr(uint8_t tc,void *mem) {
   Expression *e = malloc(sizeof(Expression));
@@ -14,60 +11,56 @@ Expression * mallocExpr(uint8_t tc,void *mem) {
   return e;
 }
 
-// Expression * copyExpr(Expression *e) {
-//   Expression *cpy = mallocExpr(e->typecode,e->num_ptrs);
-//
-//   switch (e->typecode) {
-//     case 0: {
-//       int len = *((int *)e->ptrs[1]);
-//       COPY_SINGLETON(int,cpy->ptrs[1],e->ptrs[1]);
-//       cpy->ptrs[0] = (char *)malloc(sizeof(char)*len);
-//       strncpy((char *)(cpy->ptrs[0]),(char *)(e->ptrs[0]),len);
-//       break;
-//     }
-//     case 1: {
-//       COPY_SINGLETON(int64_t,cpy->ptrs[0],e->ptrs[0]);
-//       COPY_SINGLETON(int64_t,cpy->ptrs[1],e->ptrs[1]);
-//       break;
-//     }
-//     case 2: {
-//       COPY_SINGLETON(uint8_t,cpy->ptrs[0],e->ptrs[0]);
-//       break;
-//     }
-//     case 3: {
-//       COPY_SINGLETON(uint8_t,cpy->ptrs[0],e->ptrs[0]);
-//       COPY_SINGLETON(uint8_t,cpy->ptrs[1],e->ptrs[1]);
-//       COPY_SINGLETON(CSig,cpy->ptrs[2],e->ptrs[2]);
-//       break;
-//     }
-//     case 5: {
-//       COPY_SINGLETON(Expression *,cpy->ptrs[0],e->ptrs[0]);
-//       COPY_SINGLETON(Expression *,cpy->ptrs[1],e->ptrs[1]);
-//       break;
-//     }
-//     case 6: {
-//       COPY_SINGLETON(void *,cpy->ptrs[0],e->ptrs[0]);
-//       break;
-//     }
-//   }
-//
-//   return cpy;
-// }
+#define ALLOC_STRUCT(t,name) struct t *name = (struct t *)malloc(sizeof(struct t));
+
+// free any expression
+Expression * copyExpression(Expression *e) {
+  Expression *cpy = mallocExpr(e->typecode,NULL);
+
+  if (isCell(e)) {
+    GET_STRUCT(e,Cell,cell);
+    ALLOC_STRUCT(Cell,new);
+    new->car = copyExpression(cell->car);
+    new->cdr = copyExpression(cell->cdr);
+    cpy->memory = new;
+  } else if (isNumber(e)) {
+    ALLOC_STRUCT(Number,new);
+    memcpy(new,e->memory,sizeof(struct Number));
+    cpy->memory = new;
+  } else if (isPointer(e)) {
+    ALLOC_STRUCT(Pointer,new);
+    memcpy(new,e->memory,sizeof(struct Pointer));
+    cpy->memory = new;
+  } else if (isProcedure(e)) {
+    ALLOC_STRUCT(Procedure,new);
+    memcpy(new,e->memory,sizeof(struct Procedure));
+    cpy->memory = new;
+  } else if (isNull(e)) {
+    cpy->memory = NULL;
+  } else if (isAtom(e)) {
+    GET_STRUCT(e,Atom,a);
+    ALLOC_STRUCT(Atom,new);
+    new->buf = (char *)malloc(sizeof(char)*(a->len));
+    new->len = a->len;
+    cpy->memory = new;
+    memcpy(new->buf,a->buf,a->len);
+  }
+  
+  return cpy;
+}
 
 // free any expression
 void freeExpression(Expression *e) {
   if (isCell(e)) {
     freeExpression(car(e));
     freeExpression(cdr(e));
-  } else if (isPointer(e)) {
-    finalizePointer(e);
   } else if (isAtom(e)) {
     struct Atom *a = (struct Atom *)(e->memory);
     free(a->buf);
   }
   
-  free(e->memory);
-  free(e);
+  if (e->memory) free(e->memory);
+  if (e) free(e);
 }
 
 // ATOM
@@ -161,8 +154,7 @@ int listLength(Expression *cell, int (*pred)(Expression *), int *out) {
   else if (isCell(cell)) {
     Expression *ep = cdr(cell);
     Expression *v = car(cell);
-    int res = (*pred)(v);
-    if (ep && v && res) {
+    if (ep && v && (*pred)(v)) {
       (*out)++;
       return listLength(ep,pred,out);
     }
@@ -181,21 +173,51 @@ int toString(Expression *cell, char **out) {
   
   while (1) {
     Expression *a, *b;
-    if ((b = cdr(x)) && (a = car(x))) {
+    if ((b = cdr(x)) && (a = car(x))) { 
+      int64_t an = ((struct Number *)(a->memory))->numerator;
+      buf[idx++] = (char)an;
+           
       if (isNull(b)) {
         buf[len] = '\0';
+        *out = buf;
         return 0;
       } else {
-        buf[idx++] = (char)a;
         x = b;
       }
     } else {
+      if (buf) free(buf);
+      out = NULL;
       return -1;
       break;
     }
   }
 }
 
+Expression * fromString(char *in,int len) {
+  Expression *res = mkNull();
+  for (int i = 0; i < len; i++) {
+    char ic = in[i];
+    Expression *new = snoc(res,mkNumber((int64_t)ic,1));
+    freeExpression(res);
+    res = new;
+  }
+  return res;
+}
+
+Expression * snoc(Expression *lst,Expression *v) {
+  Expression *newcdr = mkCell(copyExpression(v),mkNull());
+  
+  if (isNull(lst)) return newcdr;
+  
+  Expression *cpy = copyExpression(lst);
+  Expression *last = cpy;
+  while (isCell(last) && isCell(cdr(last))) last = cdr(last);
+
+  GET_STRUCT(last,Cell,ptr);
+  freeExpression(ptr->cdr); // doesn't null expression pointer
+  ptr->cdr = newcdr;
+  return cpy;
+}
 
 // POINTER
 
@@ -213,6 +235,8 @@ void * getPointer(Expression *e) {
 }
 
 void finalizePointer(Expression *e) {
-  struct Pointer *p = (struct Pointer *)e->memory;
+  GET_STRUCT(e,Pointer,p);
+  printf("before finalize\n");
   (*(p->finalizer))(p->ptr);
+  printf("after finalize\n");
 } 

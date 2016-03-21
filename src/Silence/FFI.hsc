@@ -34,13 +34,14 @@ import Data.Int
 import qualified Data.ByteString as B
 import Data.ByteString.Internal (ByteString(..))
 
+#let alignment t = "%lu", (unsigned long)offsetof(struct {char x__; t (y__); }, y__)
+
 {-
 TODO:
 1. Finish Cell-to-CharBuffer C function (and char* to cell function)
-2. Rethink dlopening in regards to pointers to C functions (expose dlopen & DL via the Pointer exprtype?)
 -}
 
-data CAtom = CAtom (Ptr CChar) CInt
+data CAtom = CAtom CString CInt
 data CNumber = CNumber Int64 Int64
 data CProcedure = CProcedure Word8 Int8 (FunPtr CSig)
 data CCell = CCell (Ptr Expression) (Ptr Expression)
@@ -48,29 +49,29 @@ data CPointer = CPointer (Ptr ()) (FunPtr PtrFinalizer)
 
 instance Storable CAtom where
   sizeOf    _ = #const sizeof(struct Atom)
-  alignment _ = #const alignof(struct Atom)
+  alignment _ = #alignment struct Atom
   peek ptr = CAtom <$> ((#peek struct Atom, buf) ptr) <*> ((#peek struct Atom, len) ptr)
   poke ptr (CAtom cstr len) = ((#poke struct Atom, buf) ptr cstr) >> ((#poke struct Atom, len) ptr len)
-    
+
 instance Storable CNumber where
   sizeOf _ = #const sizeof(struct Number)
-  alignment _ = #const alignof(struct Number)
+  alignment _ = #alignment struct Number
   peek ptr = CNumber <$> ((#peek struct Number, numerator) ptr) <*> ((#peek struct Number, denominator) ptr)
   poke ptr (CNumber n d) = ((#poke struct Number, numerator) ptr n) >> ((#poke struct Number, denominator) ptr d)
   
 instance Storable CCell where
   sizeOf _ = #const sizeof(struct Cell)
-  alignment _ = #const alignof(struct Cell)
+  alignment _ = #alignment struct Cell
   peek ptr = CCell <$> ((#peek struct Cell,car) ptr) <*> ((#peek struct Cell, cdr) ptr)
   poke ptr (CCell a b) = ((#poke struct Cell,car) ptr a) >> ((#poke struct Cell,cdr) ptr b)
   
 instance Storable CProcedure where
   sizeOf _ = #const sizeof(struct Procedure)
-  alignment _ = #const alignof(struct Procedure)
+  alignment _ = #alignment struct Procedure
   peek ptr = CProcedure
-              <$> ((#peek struct Procedure,evalArgs) ptr)
-              <*> ((#peek struct Procedure,arity) ptr)
-              <*> ((#peek struct Procedure,body) ptr)
+             <$> ((#peek struct Procedure,evalArgs) ptr)
+             <*> ((#peek struct Procedure,arity) ptr)
+             <*> ((#peek struct Procedure,body) ptr)
   poke ptr (CProcedure ea a bdy) = do
     ((#poke struct Procedure,evalArgs) ptr ea)
     ((#poke struct Procedure,arity) ptr a)
@@ -78,13 +79,13 @@ instance Storable CProcedure where
 
 instance Storable CPointer where
   sizeOf _ = #const sizeof(struct Pointer)
-  alignment _ = #const alignof(struct Pointer)
+  alignment _ = #alignment struct Pointer
   peek ptr = CPointer <$> ((#peek struct Pointer, ptr) ptr) <*> ((#peek struct Pointer, finalizer) ptr)
   poke ptr (CPointer p f) = ((#poke struct Pointer, ptr) ptr p) >> ((#poke struct Pointer, finalizer) ptr f)
 
 instance Storable Expression where
   sizeOf    _ = #const sizeof(Expression)
-  alignment _ = #const alignof(Expression)
+  alignment _ = #alignment Expression
   peek ptr = do
     (tc,eptr) <- peekExpr ptr
     case tc of

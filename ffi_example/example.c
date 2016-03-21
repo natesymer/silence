@@ -8,7 +8,8 @@
 Expression * showtype(int argc,Expression **argv);
 Expression * print_number(int argc,Expression **argv);
 const char * showTypecode(uint8_t typecode);
-Expression * id(int argc,Expression **argv);
+Expression * get_strlen(int argc,Expression **argv);
+Expression * snoc_test(int argc,Expression **argv);
 
 Expression * showtype(int argc,Expression **argv) {
   const char *tc = showTypecode(argv[0]->typecode);
@@ -21,16 +22,17 @@ Expression * print_number(int argc,Expression **argv) {
   return mkNull();
 }
 
-Expression * uppercase_atom(int argc,Expression **argv) {
-  const char *atom = "UPPERCASE-ATOM-BUG";
-  return mkAtom((char *)atom,strlen((char *)atom));
+Expression * get_strlen(int argc,Expression **argv) {
+  int len = 0;
+  if (listLength(argv[0],&isNumber,&len) == 0) {
+    return mkNumber((int64_t)len,1);
+  } else {
+    return mkBoolFalse();
+  }
 }
 
-Expression * id(int argc,Expression **argv) {
-  int len = 0;
-  listLength(argv[0],&isNumber,&len);
-  printf("string length: %d\n",len);
-  return mkNull();
+Expression * snoc_test(int argc,Expression **argv) {
+  return snoc(argv[0],argv[1]);
 }
 
 const char * showTypecode(uint8_t typecode) {

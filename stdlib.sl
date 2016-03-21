@@ -37,7 +37,10 @@
 ; (func '^ (x n) ) ;; TODO: implement me!
 (let! 'ln (log (exp 1)))
 
+;;
 
+(func 'with (ptract act) ((lambda (ptr) (begin (let! 'ret (act ptr)) (free ptr) ret)) (ptract)))
+    
 ; Higher order functions
 
 ; map (not tail recursive!)

@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define GET_STRUCT(expr,type,name) struct type *name = (struct type *)((expr)->memory);
+
 typedef struct Expression {
   uint8_t typecode;
   void *memory;
@@ -40,6 +42,7 @@ struct Pointer {
 
 Expression * mallocExpr(uint8_t tc,void *mem);
 void freeExpression(Expression *e);
+Expression * copyExpression(Expression *e);
 
 Expression * mkAtom(char *str,int len);
 int isAtom(Expression *e);
@@ -61,15 +64,17 @@ Expression * mkProcedure(uint8_t evalArgs,int8_t arity, CSig body);
 int isProcedure(Expression *e);
 
 Expression * mkNull();
+Expression * mkCell(Expression *a, Expression *d);
 int isNull(Expression *e);
-
-Expression * mkCell(Expression *a,Expression *d);
 int isCell(Expression *e);
 Expression * car(Expression *cell);
 Expression * cdr(Expression *cell);
 
+Expression * snoc(Expression *lst,Expression *i);
+
 int listLength(Expression *cell, int (*pred)(Expression *), int *out);
 int toString(Expression *cell, char **out);
+Expression * fromString(char *in,int len);
 
 Expression * mkPointer(void *ptr,PtrFinalizer f);
 int isPointer(Expression *e);
