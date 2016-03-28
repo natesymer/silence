@@ -19,12 +19,12 @@ Expression * showtype(int argc,Expression **argv) {
 Expression * print_number(int argc,Expression **argv) {
   struct Number *n = ((struct Number *)(argv[0]->memory));
   printf("%lld/%lld\n",n->numerator,n->denominator);
-  return mkNull();
+  return NULL;
 }
 
 Expression * get_strlen(int argc,Expression **argv) {
-  int len = 0;
-  if (listLength(argv[0],&isNumber,&len) == 0) {
+  int len = listLength(argv[0],&isNumber);
+  if (len != -1) {
     return mkNumber((int64_t)len,1);
   } else {
     return mkBoolFalse();

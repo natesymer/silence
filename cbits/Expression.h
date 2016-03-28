@@ -4,7 +4,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// TODO:
+// typedef remaining structs
+// better error messages instead of SEGFAULTS on NULL usage
+
 #define GET_STRUCT(expr,type,name) struct type *name = (struct type *)((expr)->memory);
+#define ALLOC_STRUCT(t,name) struct t *name = (struct t *)malloc(sizeof(struct t));
 
 typedef struct Expression {
   uint8_t typecode;
@@ -50,10 +55,6 @@ int atomParts(Expression *e, char **ptr, int *len);
 
 Expression * mkNumber(int64_t num,int64_t den);
 int isNumber(Expression *e);
-int numberParts(Expression *e, int64_t *num, int64_t *denom);
-
-int numberAsDouble(Expression *e, double *out);
-int numberAsInt(Expression *e, int *out);
 
 Expression * mkBoolTrue();
 Expression * mkBoolFalse();
@@ -63,16 +64,14 @@ int isTruthy(Expression *e);
 Expression * mkProcedure(uint8_t evalArgs,int8_t arity, CSig body);
 int isProcedure(Expression *e);
 
-Expression * mkNull();
 Expression * mkCell(Expression *a, Expression *d);
-int isNull(Expression *e);
 int isCell(Expression *e);
 Expression * car(Expression *cell);
 Expression * cdr(Expression *cell);
 
 Expression * snoc(Expression *lst,Expression *i);
 
-int listLength(Expression *cell, int (*pred)(Expression *), int *out);
+int listLength(Expression *e, int (*pred)(Expression *));
 int toString(Expression *cell, char **out);
 Expression * fromString(char *in,int len);
 
