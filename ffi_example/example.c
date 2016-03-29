@@ -10,6 +10,7 @@ Expression * print_number(int argc,Expression **argv);
 const char * showTypecode(uint8_t typecode);
 Expression * get_strlen(int argc,Expression **argv);
 Expression * snoc_test(int argc,Expression **argv);
+Expression * from_str_test(int arc,Expression **argv);
 
 Expression * showtype(int argc,Expression **argv) {
   const char *tc = showTypecode(argv[0]->typecode);
@@ -33,6 +34,10 @@ Expression * get_strlen(int argc,Expression **argv) {
 
 Expression * snoc_test(int argc,Expression **argv) {
   return snoc(argv[0],argv[1]);
+}
+
+Expression * from_str_test(int arc,Expression **argv) {
+  return fromString("test_string",11);
 }
 
 const char * showTypecode(uint8_t typecode) {

@@ -23,20 +23,8 @@ Expression * copyExpression(Expression *e) {
       if (isCell(e)) {
         GET_STRUCT(e,Cell,cell);
         ALLOC_STRUCT(Cell,new);
-        new->car = cell->car ? copyExpression(cell->car) : NULL;
-        new->cdr = cell->cdr ? copyExpression(cell->cdr) : NULL;
-        cpy->memory = new;
-      } else if (isNumber(e)) {
-        ALLOC_STRUCT(Number,new);
-        memcpy(new,e->memory,sizeof(struct Number));
-        cpy->memory = new;
-      } else if (isPointer(e)) {
-        ALLOC_STRUCT(Pointer,new);
-        memcpy(new,e->memory,sizeof(struct Pointer));
-        cpy->memory = new;
-      } else if (isProcedure(e)) {
-        ALLOC_STRUCT(Procedure,new);
-        memcpy(new,e->memory,sizeof(struct Procedure));
+        new->car = copyExpression(cell->car);
+        new->cdr = copyExpression(cell->cdr);
         cpy->memory = new;
       } else if (isAtom(e)) {
         GET_STRUCT(e,Atom,a);
@@ -45,7 +33,19 @@ Expression * copyExpression(Expression *e) {
         new->len = a->len;
         cpy->memory = new;
         memcpy(new->buf,a->buf,a->len);
-      }
+      } else if (isNumber(e)) {
+        ALLOC_STRUCT(Number,new);
+        memcpy(new,e->memory,sizeof(Number));
+        cpy->memory = new;
+      } else if (isPointer(e)) {
+        ALLOC_STRUCT(Pointer,new);
+        memcpy(new,e->memory,sizeof(Pointer));
+        cpy->memory = new;
+      } else if (isProcedure(e)) {
+        ALLOC_STRUCT(Procedure,new);
+        memcpy(new,e->memory,sizeof(Procedure));
+        cpy->memory = new;
+      } 
     }
   }
 
@@ -67,6 +67,7 @@ void freeExpression(Expression *e) {
     }
     free(e);
   }
+  e = NULL;
 }
 
 // Predicates
@@ -81,7 +82,7 @@ Expression * mkAtom(char *str,int len) {
   ALLOC_STRUCT(Atom,a);
   a->len = len;
   a->buf = (char *)malloc(sizeof(char)*len);
-  strncpy(a->buf,str,len);
+  strncpy(a->buf,str,len); // TODO: copy & calc length better
   return mallocExpr(0,a);
 }
 
@@ -156,6 +157,7 @@ int isList(Expression *e) { return listLength(e,&always) != -1; }
 // turn a LISP string (list of numbers) into a char *.
 // if *out is a buffer, it is used. Otherwise, a new
 // buffer is allocated to accommodate each "character".
+// TODO: recursive
 int toString(Expression *cell, char **out) {
   if (out == NULL) {
     int len = listLength(cell,&isNumber);
@@ -183,27 +185,20 @@ int toString(Expression *cell, char **out) {
 }
 
 Expression * fromString(char *in,int len) {
-  Expression *res = NULL;
-  for (int i = 0; i < len; i++) {
-    char ic = in[i];
-    Expression *new = snoc(res,mkNumber((int64_t)ic,1));
-    freeExpression(res);
-    res = new;
-  }
-  return res;
+  if (len == 0) return NULL;
+  else return mkCell(mkNumber(*in,1),fromString(in+1,len-1));
 }
 
 Expression * snoc(Expression *lst,Expression *v) {
-  Expression *newcdr = mkCell(copyExpression(v),NULL);
-  if (!lst) return newcdr;
+  if (!lst) return mkCell(copyExpression(v),NULL);
   else {
     Expression *cpy = copyExpression(lst);
     Expression *last = cpy;
     while (last && isCell(last) && cdr(last) && isCell(cdr(last))) last = cdr(last);
     
     GET_STRUCT(last,Cell,ptr);
-    freeExpression(ptr->cdr); // doesn't null expression pointer
-    ptr->cdr = newcdr;
+    freeExpression(ptr->cdr);
+    ptr->cdr = snoc(ptr->cdr,v);
     return cpy;
   }
 }
@@ -218,14 +213,9 @@ Expression * mkPointer(void *ptr,PtrFinalizer f) {
 }
 
 int isPointer(Expression *e) { return e->typecode == 7; }
-
-void * getPointer(Expression *e) {
-  return ((struct Pointer *)e->memory)->ptr;
-}
+void * getPointer(Expression *e) { GET_STRUCT(e,Pointer,p); return p->ptr; }
 
 void finalizePointer(Expression *e) {
   GET_STRUCT(e,Pointer,p);
-  printf("before finalize\n");
   (*(p->finalizer))(p->ptr);
-  printf("after finalize\n");
 } 

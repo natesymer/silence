@@ -8,8 +8,8 @@
 // typedef remaining structs
 // better error messages instead of SEGFAULTS on NULL usage
 
-#define GET_STRUCT(expr,type,name) struct type *name = (struct type *)((expr)->memory);
-#define ALLOC_STRUCT(t,name) struct t *name = (struct t *)malloc(sizeof(struct t));
+#define GET_STRUCT(expr,type,name) type *name = (type *)((expr)->memory);
+#define ALLOC_STRUCT(t,name) t *name = (t *)malloc(sizeof(t));
 
 typedef struct Expression {
   uint8_t typecode;
@@ -19,31 +19,31 @@ typedef struct Expression {
 typedef Expression * (*CSig)(int,Expression **);
 typedef void (*PtrFinalizer)(void *);
 
-struct Atom {
+typedef struct Atom {
   char *buf;
   int len;
-};
+} Atom;
 
-struct Number {
+typedef struct Number {
   int64_t numerator;
   int64_t denominator;
-};
+} Number;
 
-struct Procedure {
+typedef struct Procedure {
   uint8_t evalArgs;
   int8_t arity;
   CSig body;
-};
+} Procedure;
 
-struct Cell {
+typedef struct Cell {
   Expression *car;
   Expression *cdr;
-};
+} Cell;
 
-struct Pointer {
+typedef struct Pointer {
   void *ptr;
   PtrFinalizer finalizer;
-};
+} Pointer;
 
 Expression * mallocExpr(uint8_t tc,void *mem);
 void freeExpression(Expression *e);
