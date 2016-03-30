@@ -58,10 +58,9 @@ newtype LispM a = LispM {
 } deriving (Functor,Applicative,Monad,MonadIO,MonadState [Scope])
 
 type Scope = HashMap ByteString Expression
-type PrimFunc = [Expression] -> LispM Expression -- TODO: Make this a state action: [Expression] -> [Scope] -> IO (Expression,[Scope])
+type PrimFunc = [Expression] -> LispM Expression
 type PtrFinalizer = Ptr () -> IO ()
 
--- TODO: storable/ptr instance
 -- |A lisp expression.
 data Expression = Atom ByteString
                 | Number Rational

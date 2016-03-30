@@ -14,7 +14,7 @@ where
   * first class environments
   * standard library
   * quasiquoter
-  * vectors
+  * vectors/memory arrays via Pointers
 * pipe dreams
   * infix syntax
   * pattern matching

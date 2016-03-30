@@ -18,20 +18,19 @@ The idea is to remain as brief as possible; under 1000 lines of code, ideally un
 
 - Primitives
 	- Anything you'd need to write a solipsistic program 
-	- IO will be implemented soon
-		- Files
-		- Handles
-		- And more! (*maybe networking!*)
+	- IO will be implemented soon using the FFI (or maybe through a datatype with literals!)
+		- File path in \`\` will open a file etc...
 - Basic semantics (see Silence.Semantics module)
 	- Environment lookup
 	- Expression evaluation
 - Syntax
-	- Vectors will be added if they are implemented
+- C FFI (see `ffi_example/`)
+	- TODO: documentation
 
 ## What will be implemented:
 
 If I find the time (!!), I will implement the TODO in `src/Felony/Semantics.hs`.
 
-In addition to that, a package manager might also be implemented (in Silence?)
+In addition to that, a package manager might also be implemented (in Silence?). This would make the FFI so much more accessible & cross-platform.
 
 Lastly, a Silence-to-C compiler will eventually be implemented.
