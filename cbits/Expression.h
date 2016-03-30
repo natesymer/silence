@@ -8,8 +8,8 @@
 // typedef remaining structs
 // better error messages instead of SEGFAULTS on NULL usage
 
-#define GET_STRUCT(expr,type,name) type *name = (type *)((expr)->memory);
-#define ALLOC_STRUCT(t,name) t *name = (t *)malloc(sizeof(t));
+#define MEMORY(expr,type) ((type *)((expr)->memory))
+#define ALLOC(t) (t *)malloc(sizeof(t))
 
 typedef struct Expression {
   uint8_t typecode;
@@ -51,7 +51,6 @@ Expression * copyExpression(Expression *e);
 
 Expression * mkAtom(char *str,int len);
 int isAtom(Expression *e);
-int atomParts(Expression *e, char **ptr, int *len);
 
 Expression * mkNumber(int64_t num,int64_t den);
 int isNumber(Expression *e);

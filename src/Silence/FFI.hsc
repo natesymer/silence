@@ -3,8 +3,7 @@
 module Silence.FFI
 (
   loadForeignCode,
-  loadForeignProcedure,
-  Expression()
+  loadForeignProcedure
 )
 where
   
@@ -15,7 +14,7 @@ import Silence.Expression
 import System.Posix.DynamicLinker.Prim hiding (Null)
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array
-import Foreign.Storable
+import Foreign.Storable (peek,peekByteOff)
 import Foreign.Ptr
 import Foreign.C.Types
 import Foreign.C.String
@@ -32,14 +31,11 @@ import Data.Int
 import qualified Data.ByteString as B
 import Data.ByteString.Internal (ByteString(..))
 import GHC.Real (Ratio(..))
+import System.IO.Unsafe
 
---
--- C Expression "memory" Struct Interop
---
-
--- These foreign imports use the C implementation
--- of expression memory layout to guarantee the
--- (hard to debug) layout of expressions in memory.
+-- | C Expression "memory" Struct Interop
+-- These foreign imports use the C implementation of expression memory
+-- layout to guarantee the (hard to debug) layout of expressions in memory.
 
 foreign import ccall "mkAtom"
   c_mkAtom :: CString -> CInt -> IO (Ptr Expression)
@@ -154,32 +150,35 @@ foreign import ccall
 -- |Wrap a C LISP function in a Haskell LISP function.
 -- the following rule holds: @'toCSig' '.' 'fromCSig' = 'id'@
 fromCSig :: CSig -> PrimFunc
-fromCSig cf es = liftIO $ bracket (withCArgs $ cf $ length es) free derefExpression
-  where withCArgs = bracket allocArgs freeArgs
-        allocArgs = mapM (refExpression) es >>= newArray
-        freeArgs ptr = (peekArray (length es) ptr >>= mapM_ freeExpression) *> free ptr
+fromCSig cf = \es -> liftIO $ bracket (withCArgs es) free derefExpression
+  where withCArgs args = bracket
+                           (mapM refExpression args)
+                           (mapM_ freeExpression)
+                           (($!) (flip withArray $ cf $ length args))
 
 -- |Wrap a Haskell LISP function in a C LISP function.
 toCSig :: PrimFunc -> CSig
-toCSig f n args = peekArray n args >>= mapM derefExpression >>= runHLisp >>= refExpression
+toCSig f = \n args -> peekArgs [] args n >>= runHLisp >>= refExpression
   where runHLisp hargs = evalStateT (runLispM $ f hargs) []
+        peekArgs acc _ 0 = return acc
+        peekArgs acc ptr n = unsafeInterleaveIO $ do
+          v <- derefExpression =<< peek (advancePtr ptr (n-1))
+          v `seq` (peekArgs (v:acc) ptr (n-1))
 
 -- |Load a foreign procedure.
-loadForeignProcedure :: Ptr () -- |pointer to dynamically linked code
-                     -> String -- |symbol str of function to call
+loadForeignProcedure :: Ptr () -- ^ pointer to dynamically linked code
+                     -> String -- ^ symbol str of function to call
                      -> IO (Either String PrimFunc)
-loadForeignProcedure ptr sym = withCString sym $ \sym' -> do
-  c_dlerror -- clear error
+loadForeignProcedure ptr sym = c_dlerror *> (withCString sym $ \sym' -> do
   fptr <- c_dlsym ptr sym'
   if fptr == nullFunPtr
     then c_dlerror >>= fmap Left . peekCString
-    else return $ Right $ fromCSig $ unwrapCSig fptr
+    else return $ Right $ fromCSig $ unwrapCSig fptr)
 
 -- |Load a foreign binary.
 loadForeignCode :: FilePath -> IO (Either String Expression)
-loadForeignCode fp = withCString fp $ \fp' -> do
-  c_dlerror -- clear error
+loadForeignCode fp = c_dlerror *> (withCString fp $ \fp' -> do
   ptr <- c_dlopen fp' 2 -- RTLD_NOW
   if ptr == nullPtr
     then c_dlerror >>= fmap Left . peekCString
-    else return $ Right $ Pointer ptr $ void <$> c_dlclose
+    else return $ Right $ Pointer ptr $ void <$> c_dlclose)

@@ -32,6 +32,10 @@ Expression * get_strlen(int argc,Expression **argv) {
   }
 }
 
+Expression * make_c_procedure(int argc,Expression **argv) {
+  return mkProcedure(1,2,snoc_test);
+}
+
 Expression * snoc_test(int argc,Expression **argv) {
   return snoc(argv[0],argv[1]);
 }

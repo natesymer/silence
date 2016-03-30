@@ -5,15 +5,16 @@
 
 // MEMORY MANAGEMENT
 
-// allocate a general expression
+// general expression allocation. Takes a "typecode"
+// and a memory pointer.
 Expression * mallocExpr(uint8_t tc,void *mem) {
-  Expression *e = (Expression *)malloc(sizeof(Expression));
+  Expression *e = ALLOC(Expression);
   e->typecode = tc;
   e->memory = mem;
   return e;
 }
 
-// free any expression
+// copy any expression
 Expression * copyExpression(Expression *e) {
   Expression *cpy = NULL;
   if (e) {
@@ -21,30 +22,27 @@ Expression * copyExpression(Expression *e) {
   
     if (e->memory) {
       if (isCell(e)) {
-        GET_STRUCT(e,Cell,cell);
-        ALLOC_STRUCT(Cell,new);
-        new->car = copyExpression(cell->car);
-        new->cdr = copyExpression(cell->cdr);
+        Cell *old = MEMORY(e,Cell);
+        Cell *new = ALLOC(Cell);
+        new->car = copyExpression(old->car);
+        new->cdr = copyExpression(old->cdr);
         cpy->memory = new;
       } else if (isAtom(e)) {
-        GET_STRUCT(e,Atom,a);
-        ALLOC_STRUCT(Atom,new);
-        new->buf = (char *)malloc(sizeof(char)*(a->len));
-        new->len = a->len;
+        Atom *old = MEMORY(e,Atom);
+        Atom *new = ALLOC(Atom);
+        new->buf = (char *)malloc(sizeof(char)*(old->len));
+        new->len = old->len;
         cpy->memory = new;
-        memcpy(new->buf,a->buf,a->len);
+        memcpy(new->buf,old->buf,old->len);
       } else if (isNumber(e)) {
-        ALLOC_STRUCT(Number,new);
-        memcpy(new,e->memory,sizeof(Number));
-        cpy->memory = new;
+        cpy->memory = ALLOC(Number);
+        memcpy(cpy->memory,e->memory,sizeof(Number));
       } else if (isPointer(e)) {
-        ALLOC_STRUCT(Pointer,new);
-        memcpy(new,e->memory,sizeof(Pointer));
-        cpy->memory = new;
+        cpy->memory = ALLOC(Pointer);
+        memcpy(cpy->memory,e->memory,sizeof(Pointer));
       } else if (isProcedure(e)) {
-        ALLOC_STRUCT(Procedure,new);
-        memcpy(new,e->memory,sizeof(Procedure));
-        cpy->memory = new;
+        cpy->memory = ALLOC(Procedure);
+        memcpy(cpy->memory,e->memory,sizeof(Procedure));
       } 
     }
   }
@@ -57,11 +55,10 @@ void freeExpression(Expression *e) {
   if (e) {
     if (e->memory) {
       if (isCell(e)) {
-        freeExpression(car(e));
-        freeExpression(cdr(e));
+        freeExpression(MEMORY(e,Cell)->car);
+        freeExpression(MEMORY(e,Cell)->cdr);
       } else if (isAtom(e)) {
-        GET_STRUCT(e,Atom,a);
-        free(a->buf);
+        free(MEMORY(e,Atom)->buf);
       }
       free(e->memory);
     }
@@ -79,7 +76,7 @@ int never(Expression *e) {return 0;}
 // ATOM
 
 Expression * mkAtom(char *str,int len) {
-  ALLOC_STRUCT(Atom,a);
+  Atom *a = ALLOC(Atom);
   a->len = len;
   a->buf = (char *)malloc(sizeof(char)*len);
   strncpy(a->buf,str,len); // TODO: copy & calc length better
@@ -91,15 +88,15 @@ int isAtom(Expression *e) { return e->typecode == 0; }
 // NUMBER
 
 Expression * mkNumber(int64_t num,int64_t den) {
-  ALLOC_STRUCT(Number,n);
+  Number *n = ALLOC(Number);
   n->numerator = num;
   n->denominator = den;
   return mallocExpr(1,n);
 }
 
 int isNumber(Expression *e) {return e->typecode == 1;}
-int64_t numerator(Expression *e) { GET_STRUCT(e,Number,n); return n->numerator; }
-int64_t denominator(Expression *e) { GET_STRUCT(e,Number,n); return n->numerator; }
+int64_t numerator(Expression *e) { return MEMORY(e,Number)->numerator; }
+int64_t denominator(Expression *e) { return MEMORY(e,Number)->denominator; }
 
 // BOOL
 
@@ -118,7 +115,7 @@ int isTruthy(Expression *e) {
 // TODO write @apply@? maybe import it?
 
 Expression * mkProcedure(uint8_t evalArgs,int8_t arity, CSig body) {
-  ALLOC_STRUCT(Procedure,p);
+  Procedure *p = ALLOC(Procedure);
   p->evalArgs = evalArgs;
   p->arity = arity;
   p->body = body;
@@ -130,15 +127,15 @@ int isProcedure(Expression *e) { return e->typecode == 4; }
 // CELL
 
 Expression * mkCell(Expression *a,Expression *d) {
-  ALLOC_STRUCT(Cell,c);
+  Cell *c = ALLOC(Cell);
   c->car = a;
   c->cdr = d;
   return mallocExpr(6,c);
 }
 
 int isCell(Expression *e) { return e->typecode == 6; }
-Expression * car(Expression *e) { GET_STRUCT(e,Cell,c); return c->car; }
-Expression * cdr(Expression *e) { GET_STRUCT(e,Cell,c); return c->cdr; }
+Expression * car(Expression *e) { return MEMORY(e,Cell)->car; }
+Expression * cdr(Expression *e) { return MEMORY(e,Cell)->cdr; }
 
 // Get the length of a list. Returns -1 on a non-list.
 int listLength(Expression *e, int (*pred)(Expression *)) {
@@ -196,9 +193,9 @@ Expression * snoc(Expression *lst,Expression *v) {
     Expression *last = cpy;
     while (last && isCell(last) && cdr(last) && isCell(cdr(last))) last = cdr(last);
     
-    GET_STRUCT(last,Cell,ptr);
-    freeExpression(ptr->cdr);
-    ptr->cdr = snoc(ptr->cdr,v);
+    Cell *mem = MEMORY(last,Cell);
+    freeExpression(mem->cdr);
+    mem->cdr = snoc(mem->cdr,v);
     return cpy;
   }
 }
@@ -206,16 +203,16 @@ Expression * snoc(Expression *lst,Expression *v) {
 // POINTER
 
 Expression * mkPointer(void *ptr,PtrFinalizer f) {
-  ALLOC_STRUCT(Pointer, p);
+  Pointer *p = ALLOC(Pointer);
   p->ptr = ptr;
   p->finalizer = f;
   return mallocExpr(7,p);
 }
 
 int isPointer(Expression *e) { return e->typecode == 7; }
-void * getPointer(Expression *e) { GET_STRUCT(e,Pointer,p); return p->ptr; }
+void * getPointer(Expression *e) { return MEMORY(e,Pointer)->ptr; }
 
 void finalizePointer(Expression *e) {
-  GET_STRUCT(e,Pointer,p);
+  Pointer *p = MEMORY(e,Pointer);
   (*(p->finalizer))(p->ptr);
 } 
