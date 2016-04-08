@@ -14,43 +14,38 @@ Expression * mallocExpr(uint8_t tc,void *mem) {
   return e;
 }
 
-// copy any expression
+// copy an expression
 Expression * copyExpression(Expression *e) {
   Expression *cpy = NULL;
   if (e) {
     cpy = mallocExpr(e->typecode,NULL);
-  
-    if (e->memory) {
-      if (isCell(e)) {
-        Cell *old = MEMORY(e,Cell);
-        Cell *new = ALLOC(Cell);
-        new->car = copyExpression(old->car);
-        new->cdr = copyExpression(old->cdr);
-        cpy->memory = new;
-      } else if (isAtom(e)) {
-        Atom *old = MEMORY(e,Atom);
-        Atom *new = ALLOC(Atom);
-        new->buf = (char *)malloc(sizeof(char)*(old->len));
-        new->len = old->len;
-        cpy->memory = new;
-        memcpy(new->buf,old->buf,old->len);
-      } else if (isNumber(e)) {
-        cpy->memory = ALLOC(Number);
-        memcpy(cpy->memory,e->memory,sizeof(Number));
-      } else if (isPointer(e)) {
-        cpy->memory = ALLOC(Pointer);
-        memcpy(cpy->memory,e->memory,sizeof(Pointer));
-      } else if (isProcedure(e)) {
-        cpy->memory = ALLOC(Procedure);
-        memcpy(cpy->memory,e->memory,sizeof(Procedure));
-      } 
+    if (isCell(e)) {
+      Cell *new = ALLOC(Cell);
+      new->car = copyExpression(MEMORY(e,Cell)->car);
+      new->cdr = copyExpression(MEMORY(e,Cell)->cdr);
+      cpy->memory = new;
+    } else if (isAtom(e)) {
+      Atom *old = MEMORY(e,Atom);
+      Atom *new = ALLOC(Atom);
+      new->buf = ALLOCN(char,old->len);
+      new->len = old->len;
+      cpy->memory = new;
+      memcpy(new->buf,old->buf,new->len);
+    } else if (isNumber(e)) {
+      cpy->memory = ALLOC(Number);
+      memcpy(cpy->memory,e->memory,sizeof(Number));
+    } else if (isPointer(e)) {
+      cpy->memory = ALLOC(Pointer);
+      memcpy(cpy->memory,e->memory,sizeof(Pointer));
+    } else if (isProcedure(e)) {
+      cpy->memory = ALLOC(Procedure);
+      memcpy(cpy->memory,e->memory,sizeof(Procedure));
     }
   }
-
   return cpy;
 }
 
-// free any expression
+// free an expression
 void freeExpression(Expression *e) {
   if (e) {
     if (e->memory) {
@@ -78,12 +73,12 @@ int never(Expression *e) {return 0;}
 Expression * mkAtom(char *str,int len) {
   Atom *a = ALLOC(Atom);
   a->len = len;
-  a->buf = (char *)malloc(sizeof(char)*len);
+  a->buf = ALLOCN(char,len);
   strncpy(a->buf,str,len); // TODO: copy & calc length better
   return mallocExpr(0,a);
 }
 
-int isAtom(Expression *e) { return e->typecode == 0; }
+int isAtom(Expression *e) { return e->memory && e->typecode == 0; }
 
 // NUMBER
 
@@ -95,6 +90,7 @@ Expression * mkNumber(int64_t num,int64_t den) {
 }
 
 int isNumber(Expression *e) {return e->typecode == 1;}
+int isIntegralNumber(Expression *e) {return isNumber(e) && denominator(e) == 1; }
 int64_t numerator(Expression *e) { return MEMORY(e,Number)->numerator; }
 int64_t denominator(Expression *e) { return MEMORY(e,Number)->denominator; }
 
@@ -102,17 +98,16 @@ int64_t denominator(Expression *e) { return MEMORY(e,Number)->denominator; }
 
 Expression * mkBoolTrue() { return mallocExpr(2,NULL); }
 Expression * mkBoolFalse() { return mallocExpr(3,NULL); }
-int isBool(Expression *e) { return e->typecode == 2 || e->typecode == 3; }
+int isBool(Expression *e) { return (e->typecode == 2 || e->typecode == 3) && e->memory == NULL; }
 
 int isTruthy(Expression *e) {
   if (!isBool(e)) return 1;
-  else if (e->typecode == 2) return 1;
-  else return 0;
+  if (e->typecode == 2) return 1;
+  return 0;
 }
 
 // PROCEDURE
-
-// TODO write @apply@? maybe import it?
+// TODO: write @apply@? maybe import it?
 
 Expression * mkProcedure(uint8_t evalArgs,int8_t arity, CSig body) {
   Procedure *p = ALLOC(Procedure);
@@ -122,7 +117,7 @@ Expression * mkProcedure(uint8_t evalArgs,int8_t arity, CSig body) {
   return mallocExpr(4,p);
 }
 
-int isProcedure(Expression *e) { return e->typecode == 4; }
+int isProcedure(Expression *e) { return e->memory && e->typecode == 4; }
 
 // CELL
 
@@ -133,7 +128,7 @@ Expression * mkCell(Expression *a,Expression *d) {
   return mallocExpr(6,c);
 }
 
-int isCell(Expression *e) { return e->typecode == 6; }
+int isCell(Expression *e) { return e->memory && e->typecode == 6; }
 Expression * car(Expression *e) { return MEMORY(e,Cell)->car; }
 Expression * cdr(Expression *e) { return MEMORY(e,Cell)->cdr; }
 
@@ -150,34 +145,38 @@ int listLength(Expression *e, int (*pred)(Expression *)) {
 }
 
 int isList(Expression *e) { return listLength(e,&always) != -1; }
+int isString(Expression *e) { return listLength(e,&isIntegralNumber) != -1; }
 
-// turn a LISP string (list of numbers) into a char *.
-// if *out is a buffer, it is used. Otherwise, a new
-// buffer is allocated to accommodate each "character".
-// TODO: recursive
+// Turn a LISP string (list of numbers) into a char *.
+// The buffer is reallocated.
+// returns:
+// 0 -> success
+// -1 -> invalid list
 int toString(Expression *cell, char **out) {
-  if (out == NULL) {
-    int len = listLength(cell,&isNumber);
-    if (len == -1) return -1;
-    else *out = malloc(sizeof(char)*len);
-  }
+  int len = listLength(cell,&isIntegralNumber);
   
-  int idx = 0;
-  Expression *a, *b, *x;
-  x = cell;
-  while ((b = cdr(x)) && (a = car(x))) {
-    (*out)[idx++] = (char)numerator(a);
+  if (len != -1) {
+    if ((*out = realloc(out,sizeof(char)*len)) == NULL) return 0;
     
-    if (!b) {
-      (*out)[idx++] = '\0';
-      return 0;
-    } else {
-      x = b;
+    int idx = 0;
+    Expression *x = cell;
+    Expression *a, *b;
+    while ((b = cdr(x)) && (a = car(x))) {
+      (*out)[idx++] = (char)numerator(a);
+    
+      if (b) x = b;
+      else {
+        (*out)[idx++] = '\0';
+        return 0;
+      }
     }
   }
+
+  if (*out) {
+    free(*out);
+    *out = NULL;
+  }
   
-  free(*out);
-  *out = NULL;
   return -1;
 }
 
@@ -209,7 +208,7 @@ Expression * mkPointer(void *ptr,PtrFinalizer f) {
   return mallocExpr(7,p);
 }
 
-int isPointer(Expression *e) { return e->typecode == 7; }
+int isPointer(Expression *e) { return e->memory && e->typecode == 7; }
 void * getPointer(Expression *e) { return MEMORY(e,Pointer)->ptr; }
 
 void finalizePointer(Expression *e) {

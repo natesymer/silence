@@ -1,6 +1,6 @@
 #!../dist/build/silence/silence -f
 
-(import "../stdlib.sl")
+(import "../../../stdlib.sl")
 
 ;; Basic example that communicates with Postgresql.
 

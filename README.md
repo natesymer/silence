@@ -12,19 +12,17 @@ Lisp dialect written in Haskell. Silence has three goals:
 
 Silence is not a finished language, and will probably remain a toy; unless someone cares a whole lot!
 
-The idea is to remain as brief as possible; under 1000 lines of code, ideally under 400-500 with primitives. The core syntax and semantics come in at ~300 lines.
+The idea is to remain as brief as possible; under 1000 lines of code, ideally under 400-500 with primitives. The core syntax and semantics come in at ~300 lines. The FFI is ~200 lines of Haskell and ~200 lines of C.
 
 ## What's implemented:
 
-- Primitives
-	- Anything you'd need to write a solipsistic program 
-	- IO will be implemented soon using the FFI (or maybe through a datatype with literals!)
-		- File path in \`\` will open a file etc...
-- Basic semantics (see Silence.Semantics module)
-	- Environment lookup
+- Semantics (see Silence.Semantics module)
+	- Primitives
+	- Environments
 	- Expression evaluation
+	- Function definition/application
 - Syntax
-- C FFI (see `ffi_example/`)
+- C FFI (see `examples/ffi/`)
 	- TODO: documentation
 
 ## What will be implemented:

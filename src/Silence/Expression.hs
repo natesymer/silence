@@ -16,7 +16,6 @@ module Silence.Expression
   toConsList,
   fromExpr,
   fromAtoms,
-  fromNumber,
   car,
   cdr,
   compose,
@@ -48,7 +47,7 @@ import qualified Data.HashMap.Strict as H
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as B
 import Data.Char hiding (isNumber)
-import Data.Ratio
+import GHC.Real
 
 import Foreign.Ptr
 
@@ -87,11 +86,11 @@ instance Eq Expression where
 
 showExpr :: Expression -> ByteString
 showExpr (Atom x) = x
-showExpr (Number x) = B.pack $ either show show $ fromNumber x
+showExpr (Number (x :% 1)) = B.pack $ show x
+showExpr (Number x) = B.pack $ show $ ((fromRational x) :: Double)
 showExpr Null = "()"
 showExpr (Bool True)  = "#t"
 showExpr (Bool False) = "#f"
--- TODO: print if the procedure evals args
 showExpr (Procedure _ (-1) _) = "<procedure with indefinite arity>"
 showExpr (Procedure _ argc _) = "<procedure with arity " <> (B.pack $ show argc) <> ">"
 showExpr c@(Cell _ _) = "(" <> f "" c <> ")"
@@ -101,12 +100,6 @@ showExpr c@(Cell _ _) = "(" <> f "" c <> ")"
         f acc (Cell a b) = acc <> showExpr a <> " . " <> showExpr b
         f _ _ = error "invalid cons list."
 showExpr (Pointer p _) = B.pack $ show p
-
--- |Convert a rational into either an 'Integer' or a 'Double'        
-fromNumber :: Rational -> Either Integer Double
-fromNumber r
-  | denominator r == 1 = Left $ numerator r
-  | otherwise = Right $ fromRational r
   
 -- |Lisp equivalent of Haskell's 'show'.
 toLispStr :: Expression -> Expression
@@ -116,8 +109,8 @@ toLispStr = toIntList . showExpr
 -- |Turns a lisp string into a Haskell 'String'.     
 fromLispStr :: Expression -> Maybe String
 fromLispStr = fromExpr integer
-  where integer (Number x) = either (Just . chr . fromInteger) (const Nothing) $ fromNumber x
-        integer _          = Nothing
+  where integer (Number (x :% 1)) = Just $ chr $ fromInteger x
+        integer _ = Nothing
         
 -- |Transform a cons list into a haskell list. It builds a function 
 -- that takes an empty list and returns a list of expressions.

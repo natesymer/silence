@@ -5,11 +5,11 @@
 #include <stdlib.h>
 
 // TODO:
-// typedef remaining structs
 // better error messages instead of SEGFAULTS on NULL usage
 
 #define MEMORY(expr,type) ((type *)((expr)->memory))
 #define ALLOC(t) (t *)malloc(sizeof(t))
+#define ALLOCN(t,n) (t *)malloc(sizeof(t)*(n))
 
 typedef struct Expression {
   uint8_t typecode;
@@ -54,6 +54,10 @@ int isAtom(Expression *e);
 
 Expression * mkNumber(int64_t num,int64_t den);
 int isNumber(Expression *e);
+int isIntegralNumber(Expression *e);
+int64_t numerator(Expression *e);
+int64_t denominator(Expression *e);
+
 
 Expression * mkBoolTrue();
 Expression * mkBoolFalse();
@@ -69,6 +73,9 @@ Expression * car(Expression *cell);
 Expression * cdr(Expression *cell);
 
 Expression * snoc(Expression *lst,Expression *i);
+
+int isList(Expression *e);
+int isString(Expression *e);
 
 int listLength(Expression *e, int (*pred)(Expression *));
 int toString(Expression *cell, char **out);
