@@ -4,7 +4,7 @@
 
 ;; Basic example that communicates with Postgresql.
 
-(let! 'postgres-sl (dlopen "postgres-sl.dylib"))
+(let! 'postgres-sl (dlopen "postgres.dylib"))
 
 (func 'connect () ((foreign postgres-sl "connect_pg")))
 (func 'query (conn sql) ((foreign postgres-sl "query_pg") conn sql))

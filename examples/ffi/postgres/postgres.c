@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <libpq-fe.h>
-#include "../cbits/Expression.h" // wherever you can find Expression.h
+#include "../../../cbits/Expression.h" // wherever you can find Expression.h
 
 Expression * connect_pg(int argc,Expression **argv);
 Expression * query_pg(int argc,Expression **argv);

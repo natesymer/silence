@@ -3,7 +3,7 @@
 #include <string.h>
 #include <math.h>
 
-#include "../cbits/Expression.h"
+#include "../../../cbits/Expression.h"
 
 Expression * showtype(int argc,Expression **argv);
 Expression * print_number(int argc,Expression **argv);
