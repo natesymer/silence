@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 // TODO:
 // better error messages instead of SEGFAULTS on NULL usage

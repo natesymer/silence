@@ -9,6 +9,7 @@ import GHC.IO.Exception
 import Control.Monad
 import qualified Data.ByteString.Char8 as B
 import Options.Applicative hiding (str)
+import Data.Monoid ((<>))
 
 main :: IO ()
 main = getArgs >>= getCommandArgs >>= evalCmd
@@ -34,17 +35,17 @@ evalCmd (Cmd (Just fp) Nothing False _) = do
   src <- readFile fp
   evalCmd $ Cmd Nothing (Just src) False ""
 evalCmd (Cmd Nothing Nothing True prompt) = repl prompt
-evalCmd _ = error "invalid arguments."
+evalCmd _ = putStrLn "invalid arguments."
 
 getCommandArgs :: [String] -> IO Cmd
 getCommandArgs = handleParseResult . execParserPure pprefs parser
   where
-    pprefs = ParserPrefs "" False True True 80
+    pprefs = ParserPrefs "" False True True True (80 :: Int)
     parser = info (helper <*> parser') (fullDesc <> header "Silence Lisp")
     parser' = Cmd
       <$> (optional $ strOption $ opt "file" 'f' "FILEPATH" Nothing "source file to evaluate")
       <*> (optional $ strOption $ opt "evaluate" 'e' "CODE" Nothing "source code to evaluate")
       <*> (flag False True $ short 'r' <> long "repl" <> help "run a REPL")
-      <*> (strOption $ opt "prompt" 't' "PROMPT" (Just "𝝺 ") "what to print at the start of each line")
+      <*> (strOption $ opt "prompt" 't' "PROMPT" (Just "silence $ ") "what to print at the start of each line")
     opt lng shrt mvar (Just defVal) hlp = (long lng <> short shrt <> metavar mvar <> value defVal <> help hlp)
     opt lng shrt mvar Nothing       hlp = (long lng <> short shrt <> metavar mvar <> help hlp)
